@@ -1,0 +1,2 @@
+# chzzk-auto-emochat
+dd
