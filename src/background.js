@@ -2,6 +2,7 @@ let lastExecutionTime = 0;
 let isAutoSending = false;
 let isPausedBySpamGuard = false; // 도배 방지 일시정지 상태
 let autoSendTimeoutId = null; // 이제 Timeout ID 사용
+let isExecuting = false;  // 현재 실행 중인지 여부를 체크하는 플래그
 
 // 기본값 설정 업데이트
 chrome.runtime.onInstalled.addListener(() => {
@@ -53,7 +54,14 @@ function showToastInActiveTab(message) {
 }
 
 function sendEmoticonTriggerToActiveTab(isAuto = true) {
+    // 이미 실행 중이면 무시
+    if (isExecuting) {
+        console.log("이미 이모티콘 전송이 실행 중입니다.");
+        return Promise.reject(new Error("이미 실행 중"));
+    }
+
     return new Promise((resolve, reject) => {
+        isExecuting = true;  // 실행 시작
         chrome.tabs.query({ active: true, currentWindow: true, url: "*://*.chzzk.naver.com/*" }, (tabs) => {
             if (tabs.length > 0) {
                 const tabId = tabs[0].id;
@@ -62,6 +70,7 @@ function sendEmoticonTriggerToActiveTab(isAuto = true) {
                     action: "injectAndSendTrigger", 
                     isAuto: isAuto
                 }, (response) => {
+                    isExecuting = false;  // 실행 완료
                     if (chrome.runtime.lastError) {
                         console.error("메시지 전송 실패:", chrome.runtime.lastError.message);
                         reject(new Error(chrome.runtime.lastError.message));
@@ -74,10 +83,14 @@ function sendEmoticonTriggerToActiveTab(isAuto = true) {
                     }
                 });
             } else {
+                isExecuting = false;  // 실행 완료
                 console.log("활성 치지직 탭 없음.");
                 reject(new Error("No active Chzzk tab found"));
             }
         });
+    }).catch(error => {
+        isExecuting = false;  // 에러 발생 시에도 실행 상태 해제
+        throw error;
     });
 }
 
@@ -293,12 +306,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 
-// 단축키 리스너 (수동 입력 로직 변경 없음)
+// 단축키 리스너 수정
 chrome.commands.onCommand.addListener((command) => {
     if (command === "trigger-emoticon") {
         console.log("수동 입력 단축키 감지:", command);
-        sendEmoticonTriggerToActiveTab(false)  // 수동 입력은 딜레이 체크 없이 바로 실행
-            .catch(e => console.error("수동 입력 실패:", e));
+        
+        // 이미 실행 중이면 무시
+        if (isExecuting) {
+            console.log("이미 이모티콘 전송이 실행 중입니다.");
+            showToastInActiveTab("이모티콘 전송이 실행 중입니다");
+            return;
+        }
+
+        const currentTime = Date.now();
+        const manualDelay = 1000; // 수동 입력 딜레이 1초로 설정
+
+        if (currentTime - lastExecutionTime >= manualDelay) {
+            sendEmoticonTriggerToActiveTab(false)  // 수동 입력
+                .then(() => {
+                    lastExecutionTime = Date.now(); // 성공 시에만 시간 갱신
+                }).catch(e => console.error("수동 입력 실패:", e));
+        } else {
+            console.log(`수동 입력 딜레이(${manualDelay}ms) 대기 중...`);
+        }
     } else if (command === "toggle-auto-send") {
         console.log("자동 입력 토글 단축키 감지:", command);
         if (isAutoSending) {
