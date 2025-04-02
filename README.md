@@ -15,37 +15,7 @@
 3. 단축키 또는 팝업 메뉴를 통해 자동/수동 전송 사용
 
 ## 단축키
-- 수동 전송: (설정된 단축키)
-- 자동 전송 토글: (설정된 단축키)
+- 수동 전송(Default) : Alt + Q
+- 자동 전송 토글(Default) : Alt + W
+- 단축키는 확장프로그램 설정에서 변경 가능
 
-// 파일들을 GitHub에 푸시
-await mcp_github_push_files({
-  owner: "142spp",
-  repo: "chzzk-auto-emochat",
-  branch: "main",
-  message: "Initial commit: Add extension files",
-  files: [
-    {
-      path: "README.md",
-      content: files[0].content
-    },
-    {
-      path: "src/content.js",
-      content: await read_file({
-        target_file: "content.js",
-        should_read_entire_file: true,
-        start_line_one_indexed: 1,
-        end_line_one_indexed_inclusive: 500
-      })
-    },
-    {
-      path: "src/background.js",
-      content: await read_file({
-        target_file: "background.js",
-        should_read_entire_file: true,
-        start_line_one_indexed: 1,
-        end_line_one_indexed_inclusive: 500
-      })
-    }
-  ]
-});
