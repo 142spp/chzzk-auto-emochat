@@ -24,44 +24,33 @@ const CONSTANTS = {
 // --- Helper Functions ---
 
 /**
- * 페이지에서 사용 가능한 이미지 이모티콘 데이터를 가져옵니다.
- * @returns {Array<{placeholder: string, imageUrl: string}>} 이모티콘 데이터 배열
- * @throws {Error} 이모티콘 데이터를 찾을 수 없는 경우
+ * 사용 가능한 이모티콘 데이터를 가져옵니다.
+ * @returns {Promise<Object>} 이모티콘 데이터
  */
-function getAvailableEmoticonData() {
-    if (cachedEmoticonData?.length > 0) {
-        console.log("캐시된 이모티콘 데이터 사용.");
-        return cachedEmoticonData;
-    }
-
-    console.log("새 이모티콘 데이터 가져오는 중...");
-    const emoticonButtons = document.querySelectorAll(CONSTANTS.EMOTICON_BUTTON_SELECTOR);
-
-    if (emoticonButtons.length === 0) {
-        throw new Error("이모티콘 버튼을 찾을 수 없습니다. 이모티콘 팝업이 열려있는지 확인하세요.");
-    }
-
-    const data = Array.from(emoticonButtons).map(button => {
-        const img = button.querySelector('img');
-        if (!img) return null;
-
-        const placeholder = img.getAttribute('alt');
-        const imageUrl = img.getAttribute('src');
-
-        if (!placeholder || !/^\{:.+:\}$/.test(placeholder) || !imageUrl) {
-            return null;
+async function getAvailableEmoticonData() {
+    try {
+        // 먼저 캐시에서 데이터 확인
+        const cacheResponse = await chrome.runtime.sendMessage({ action: "getEmoticonCache" });
+        if (cacheResponse?.success && cacheResponse.cache) {
+            console.log('캐시된 이모티콘 데이터 사용');
+            return cacheResponse.cache;
         }
 
-        return { placeholder, imageUrl };
-    }).filter(Boolean);
+        // 캐시가 없거나 만료된 경우 새로 가져오기
+        console.log('이모티콘 데이터 새로 가져오기');
+        const emoticonData = await prepareEmoticonData();
+        
+        // 새로 가져온 데이터를 캐시에 저장
+        await chrome.runtime.sendMessage({ 
+            action: "updateEmoticonCache", 
+            data: emoticonData 
+        });
 
-    if (data.length === 0) {
-        throw new Error("유효한 이모티콘 데이터를 찾을 수 없습니다.");
+        return emoticonData;
+    } catch (error) {
+        console.error('이모티콘 데이터 가져오기 실패:', error);
+        throw error;
     }
-
-    cachedEmoticonData = data;
-    console.log(`새 이모티콘 데이터 ${data.length}개 캐시됨.`);
-    return data;
 }
 
 /**
@@ -150,7 +139,7 @@ async function setMainWorldVariable(variableName, value) {
 async function prepareEmoticonData() {
     try {
         const settings = await chrome.storage.sync.get(['minRepetitions', 'maxRepetitions']);
-        const availableEmoticons = getAvailableEmoticonData();
+        const availableEmoticons = await getAvailableEmoticonData();
 
         const minReps = Math.max(1, settings.minRepetitions || 1);
         const maxReps = Math.max(minReps, settings.maxRepetitions || 1);

@@ -15,6 +15,11 @@ const CONSTANTS = {
     BADGE_TEXTS: {
         ACTIVE: 'ON',
         INACTIVE: ''
+    },
+    CACHE: {
+        KEY: 'emoticonCache',
+        EXPIRY_TIME: 30 * 24 * 60 * 60 * 1000, // 30일
+        VERSION: 1
     }
 };
 
@@ -23,7 +28,8 @@ let state = {
     lastExecutionTime: 0,
     isAutoSending: false,
     autoSendTimeoutId: null,
-    isExecuting: false
+    isExecuting: false,
+    emoticonCache: null
 };
 
 // --- Helper Functions ---
@@ -151,8 +157,95 @@ function scheduleNextAutoSend() {
     });
 }
 
+/**
+ * 이모티콘 캐시를 초기화합니다.
+ */
+async function initializeEmoticonCache() {
+    try {
+        const result = await chrome.storage.local.get([CONSTANTS.CACHE.KEY]);
+        const cache = result[CONSTANTS.CACHE.KEY];
+
+        if (cache && 
+            cache.version === CONSTANTS.CACHE.VERSION && 
+            Date.now() - cache.lastUpdated < CONSTANTS.CACHE.EXPIRY_TIME) {
+            state.emoticonCache = cache;
+            console.log('이모티콘 캐시 로드 완료');
+            return true;
+        }
+
+        // 캐시가 없거나 만료된 경우
+        state.emoticonCache = {
+            version: CONSTANTS.CACHE.VERSION,
+            lastUpdated: Date.now(),
+            emoticons: {}
+        };
+        await chrome.storage.local.set({ [CONSTANTS.CACHE.KEY]: state.emoticonCache });
+        console.log('이모티콘 캐시 초기화 완료');
+        return true;
+    } catch (error) {
+        console.error('이모티콘 캐시 초기화 실패:', error);
+        return false;
+    }
+}
+
+/**
+ * 이모티콘 캐시를 업데이트합니다.
+ * @param {Object} emoticonData - 새로운 이모티콘 데이터
+ */
+async function updateEmoticonCache(emoticonData) {
+    try {
+        if (!state.emoticonCache) {
+            await initializeEmoticonCache();
+        }
+
+        state.emoticonCache = {
+            version: CONSTANTS.CACHE.VERSION,
+            lastUpdated: Date.now(),
+            emoticons: emoticonData
+        };
+
+        await chrome.storage.local.set({ [CONSTANTS.CACHE.KEY]: state.emoticonCache });
+        console.log('이모티콘 캐시 업데이트 완료');
+        return true;
+    } catch (error) {
+        console.error('이모티콘 캐시 업데이트 실패:', error);
+        return false;
+    }
+}
+
+/**
+ * 이모티콘 캐시를 가져옵니다.
+ * @returns {Object|null} 캐시된 이모티콘 데이터
+ */
+function getEmoticonCache() {
+    if (!state.emoticonCache) {
+        console.log('캐시가 초기화되지 않음');
+        return null;
+    }
+
+    const { version, lastUpdated, emoticons } = state.emoticonCache;
+    // 버전 검증
+    if (version !== CONSTANTS.CACHE.VERSION) {
+        console.log('캐시 버전 불일치');
+        return null;
+    }
+    // 만료 시간 검증
+    if (Date.now() - lastUpdated > CONSTANTS.CACHE.EXPIRY_TIME) {
+        console.log('캐시 만료됨');
+        return null;
+    }
+    // 이모티콘 데이터 유효성 검증
+    if (!emoticons || typeof emoticons !== 'object' || Object.keys(emoticons).length === 0) {
+        console.log('캐시된 이모티콘 데이터가 유효하지 않음');
+        return null;
+    }
+
+    console.log('유효한 캐시 데이터 반환');
+    return emoticons;
+}
+
 // --- 이벤트 리스너 ---
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener(async () => {
     chrome.storage.sync.get(Object.keys(CONSTANTS.DEFAULT_SETTINGS), (result) => {
         const updates = {};
         Object.entries(CONSTANTS.DEFAULT_SETTINGS).forEach(([key, value]) => {
@@ -165,6 +258,7 @@ chrome.runtime.onInstalled.addListener(() => {
             chrome.storage.sync.set(updates);
         }
     });
+    await initializeEmoticonCache();
     console.log('이모티콘 도우미 설치/업데이트됨. 기본 설정 확인.');
     updateIconBadge();
 });
@@ -271,6 +365,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     sendResponse(result);
                     break;
                 }
+                case "getEmoticonCache":
+                    sendResponse({
+                        success: true,
+                        cache: getEmoticonCache()
+                    });
+                    break;
+                case "updateEmoticonCache":
+                    const success = await updateEmoticonCache(message.data);
+                    sendResponse({ success });
+                    break;
 
                 default:
                     console.log("알 수 없는 메시지:", message);
@@ -286,8 +390,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
         }
     })();
-
-    return true;
 });
 
 // 단축키 핸들러
