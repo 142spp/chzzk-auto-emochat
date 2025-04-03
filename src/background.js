@@ -7,6 +7,7 @@ const CONSTANTS = {
         maxDelay: 3000
     },
     MIN_DELAY: 500,
+    MANUAL_DELAY: 1000, // 수동 입력 딜레이
     BADGE_COLORS: {
         DEFAULT: '#9E9E9E',
         PAUSED: '#FF9800',
@@ -362,9 +363,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // 단축키 리스너 수정
 chrome.commands.onCommand.addListener((command) => {
-    if (command === "trigger-emoticon") {
-        console.log("수동 입력 단축키 감지:", command);
-        
+    if (command === "send-emoticon") {
+        console.log("수동 이모티콘 전송 단축키 감지:", command);
+        const currentTime = Date.now();
+
         // 이미 실행 중이면 무시
         if (state.isExecuting) {
             console.log("이미 이모티콘 전송이 실행 중입니다.");
@@ -372,16 +374,14 @@ chrome.commands.onCommand.addListener((command) => {
             return;
         }
 
-        const currentTime = Date.now();
-        const manualDelay = 1000; // 수동 입력 딜레이 1초로 설정
-
-        if (currentTime - state.lastExecutionTime >= manualDelay) {
+        if (currentTime - state.lastExecutionTime >= CONSTANTS.MANUAL_DELAY) {
             sendEmoticonTriggerToActiveTab(false)  // 수동 입력
                 .then(() => {
                     state.lastExecutionTime = Date.now(); // 성공 시에만 시간 갱신
                 }).catch(e => console.error("수동 입력 실패:", e));
         } else {
-            console.log(`수동 입력 딜레이(${manualDelay}ms) 대기 중...`);
+            console.log("수동 입력 간격이 너무 짧습니다.");
+            showToastInActiveTab("잠시 후 다시 시도해주세요");
         }
     } else if (command === "toggle-auto-send") {
         console.log("자동 입력 토글 단축키 감지:", command);
