@@ -361,9 +361,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 
-// 단축키 리스너 수정
+// 단축키 핸들러
 chrome.commands.onCommand.addListener((command) => {
-    if (command === "send-emoticon") {
+    if (command === "trigger-emoticon") {
         console.log("수동 이모티콘 전송 단축키 감지:", command);
         const currentTime = Date.now();
 
