@@ -1,142 +1,196 @@
-let lastExecutionTime = 0;
-let isAutoSending = false;
-let isPausedBySpamGuard = false; // 도배 방지 일시정지 상태
-let autoSendTimeoutId = null; // 이제 Timeout ID 사용
-let isExecuting = false;  // 현재 실행 중인지 여부를 체크하는 플래그
-
-// 기본값 설정 업데이트
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.sync.get(['minRepetitions', 'maxRepetitions', 'minDelay', 'maxDelay'], (result) => {
-    if (result.minRepetitions === undefined) chrome.storage.sync.set({ minRepetitions: 1 });
-    if (result.maxRepetitions === undefined) chrome.storage.sync.set({ maxRepetitions: 1 });
-    if (result.minDelay === undefined) chrome.storage.sync.set({ minDelay: 2000 });
-    if (result.maxDelay === undefined) chrome.storage.sync.set({ maxDelay: 3000 });
-  });
-  console.log('이모티콘 도우미 설치/업데이트됨. 기본 설정 확인.');
-  updateIconBadge();
-});
-
-chrome.runtime.onStartup.addListener(() => {
-    isAutoSending = false;
-    isPausedBySpamGuard = false;
-    if (autoSendTimeoutId) {
-        clearTimeout(autoSendTimeoutId);
-        autoSendTimeoutId = null;
+// --- 상수 정의 ---
+const CONSTANTS = {
+    DEFAULT_SETTINGS: {
+        minRepetitions: 1,
+        maxRepetitions: 1,
+        minDelay: 2000,
+        maxDelay: 3000
+    },
+    MIN_DELAY: 500,
+    BADGE_COLORS: {
+        DEFAULT: '#9E9E9E',
+        PAUSED: '#FF9800',
+        ACTIVE: '#4CAF50'
+    },
+    BADGE_TEXTS: {
+        PAUSED: 'PAUSE',
+        ACTIVE: 'ON',
+        INACTIVE: ''
     }
-    updateIconBadge();
-});
+};
 
+// --- 상태 관리 ---
+let state = {
+    lastExecutionTime: 0,
+    isAutoSending: false,
+    isPausedBySpamGuard: false,
+    autoSendTimeoutId: null,
+    isExecuting: false
+};
 
+// --- Helper Functions ---
+
+/**
+ * 아이콘 배지를 업데이트합니다.
+ */
 function updateIconBadge() {
-    let badgeText = '';
-    let color = '#9E9E9E'; // 기본 회색 (꺼짐)
+    const { isAutoSending, isPausedBySpamGuard } = state;
+    let badgeText = CONSTANTS.BADGE_TEXTS.INACTIVE;
+    let color = CONSTANTS.BADGE_COLORS.DEFAULT;
+
     if (isAutoSending) {
         if (isPausedBySpamGuard) {
-            badgeText = 'PAUSE';
-            color = '#FF9800'; // 주황색 (일시정지)
+            badgeText = CONSTANTS.BADGE_TEXTS.PAUSED;
+            color = CONSTANTS.BADGE_COLORS.PAUSED;
         } else {
-            badgeText = 'ON';
-            color = '#4CAF50'; // 초록색 (켜짐)
+            badgeText = CONSTANTS.BADGE_TEXTS.ACTIVE;
+            color = CONSTANTS.BADGE_COLORS.ACTIVE;
         }
     }
+
     chrome.action.setBadgeText({ text: badgeText });
-    chrome.action.setBadgeBackgroundColor({ color: color });
+    chrome.action.setBadgeBackgroundColor({ color });
 }
 
-// 토스트 메시지 전송 함수
-function showToastInActiveTab(message) {
-    chrome.tabs.query({ active: true, currentWindow: true, url: "*://*.chzzk.naver.com/*" }, (tabs) => {
+/**
+ * 활성 탭에 토스트 메시지를 표시합니다.
+ * @param {string} message - 표시할 메시지
+ */
+async function showToastInActiveTab(message) {
+    try {
+        const tabs = await chrome.tabs.query({ 
+            active: true, 
+            currentWindow: true, 
+            url: "*://*.chzzk.naver.com/*" 
+        });
+        
         if (tabs.length > 0) {
-            chrome.tabs.sendMessage(tabs[0].id, { action: "showToast", message: message })
-                .catch(e => console.log("토스트 메시지 전송 실패:", e));
+            await chrome.tabs.sendMessage(tabs[0].id, { 
+                action: "showToast", 
+                message 
+            });
         }
-    });
+    } catch (error) {
+        console.error("토스트 메시지 전송 실패:", error);
+    }
 }
 
-function sendEmoticonTriggerToActiveTab(isAuto = true) {
-    // 이미 실행 중이면 무시
-    if (isExecuting) {
+/**
+ * 활성 탭에 이모티콘 트리거를 전송합니다.
+ * @param {boolean} isAuto - 자동 전송 여부
+ * @returns {Promise<boolean>} 전송 성공 여부
+ */
+async function sendEmoticonTriggerToActiveTab(isAuto = true) {
+    if (state.isExecuting) {
         console.log("이미 이모티콘 전송이 실행 중입니다.");
-        return Promise.reject(new Error("이미 실행 중"));
+        throw new Error("이미 실행 중");
     }
 
-    return new Promise((resolve, reject) => {
-        isExecuting = true;  // 실행 시작
-        chrome.tabs.query({ active: true, currentWindow: true, url: "*://*.chzzk.naver.com/*" }, (tabs) => {
-            if (tabs.length > 0) {
-                const tabId = tabs[0].id;
-                console.log(`탭 (${tabId})에 이모티콘 트리거 전송 (${isAuto ? '자동' : '수동'})`);
-                chrome.tabs.sendMessage(tabId, { 
-                    action: "injectAndSendTrigger", 
-                    isAuto: isAuto
-                }, (response) => {
-                    isExecuting = false;  // 실행 완료
-                    if (chrome.runtime.lastError) {
-                        console.error("메시지 전송 실패:", chrome.runtime.lastError.message);
-                        reject(new Error(chrome.runtime.lastError.message));
-                    } else if (response && response.success) {
-                        console.log("콘텐츠 스크립트 작업 성공 응답");
-                        resolve(true);
-                    } else {
-                        console.log("콘텐츠 스크립트 응답 실패 또는 작업 실패:", response);
-                        reject(new Error("Content script failed"));
-                    }
-                });
-            } else {
-                isExecuting = false;  // 실행 완료
-                console.log("활성 치지직 탭 없음.");
-                reject(new Error("No active Chzzk tab found"));
-            }
+    try {
+        state.isExecuting = true;
+        const tabs = await chrome.tabs.query({ 
+            active: true, 
+            currentWindow: true, 
+            url: "*://*.chzzk.naver.com/*" 
         });
-    }).catch(error => {
-        isExecuting = false;  // 에러 발생 시에도 실행 상태 해제
+
+        if (tabs.length === 0) {
+            throw new Error("활성 치지직 탭 없음");
+        }
+
+        const tabId = tabs[0].id;
+        console.log(`탭 (${tabId})에 이모티콘 트리거 전송 (${isAuto ? '자동' : '수동'})`);
+
+        const response = await chrome.tabs.sendMessage(tabId, { 
+            action: "injectAndSendTrigger", 
+            isAuto 
+        });
+
+        if (!response?.success) {
+            throw new Error("Content script failed");
+        }
+
+        return true;
+    } catch (error) {
+        console.error("이모티콘 트리거 전송 실패:", error);
         throw error;
-    });
+    } finally {
+        state.isExecuting = false;
+    }
 }
 
-// 다음 자동 실행 예약 함수 (재귀적 setTimeout 사용)
+/**
+ * 다음 자동 실행을 예약합니다.
+ */
 function scheduleNextAutoSend() {
-    if (!isAutoSending || isPausedBySpamGuard) { // 활성 상태이고, 일시정지 상태가 아닐 때만 실행
+    const { isAutoSending, isPausedBySpamGuard, autoSendTimeoutId } = state;
+
+    if (!isAutoSending || isPausedBySpamGuard) {
         console.log("다음 자동 실행 예약 중지됨 (비활성 또는 일시정지).");
         if (autoSendTimeoutId) {
             clearTimeout(autoSendTimeoutId);
-            autoSendTimeoutId = null;
+            state.autoSendTimeoutId = null;
         }
         return;
     }
 
     chrome.storage.sync.get(['minDelay', 'maxDelay'], (settings) => {
-        let minDelay = settings.minDelay || 2000;
-        let maxDelay = settings.maxDelay || 3000;
-
-        if (minDelay < 500) minDelay = 500;
-        if (maxDelay < minDelay) maxDelay = minDelay; // 최대값이 최소값보다 작으면 최소값으로
+        let minDelay = Math.max(CONSTANTS.MIN_DELAY, settings.minDelay || CONSTANTS.DEFAULT_SETTINGS.minDelay);
+        let maxDelay = Math.max(minDelay, settings.maxDelay || CONSTANTS.DEFAULT_SETTINGS.maxDelay);
 
         const randomDelay = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
         console.log(`다음 자동 실행 ${randomDelay}ms 후에 예약됨`);
 
-        autoSendTimeoutId = setTimeout(async () => { // async 추가
-            if (!isAutoSending || isPausedBySpamGuard) {
+        state.autoSendTimeoutId = setTimeout(async () => {
+            if (!state.isAutoSending || state.isPausedBySpamGuard) {
                 console.log("Timeout 실행 시점: 자동 실행 비활성 또는 일시정지됨.");
-                return; // Timeout 실행 시점에 상태 다시 확인
+                return;
             }
+
             try {
                 await sendEmoticonTriggerToActiveTab();
-                // 성공 시에만 다음 실행 예약
                 scheduleNextAutoSend();
             } catch (error) {
                 console.error("자동 입력 중 오류 발생, 자동 입력 중지:", error.message);
-                stopAutoSend(`오류 발생 (${error.message})`); // 오류 시 자동 중지
+                stopAutoSend(`오류 발생 (${error.message})`);
             }
         }, randomDelay);
     });
 }
 
-function startAutoSend() {
-    if (isAutoSending && !isPausedBySpamGuard) return;
+// --- 이벤트 리스너 ---
+chrome.runtime.onInstalled.addListener(() => {
+    chrome.storage.sync.get(Object.keys(CONSTANTS.DEFAULT_SETTINGS), (result) => {
+        const updates = {};
+        Object.entries(CONSTANTS.DEFAULT_SETTINGS).forEach(([key, value]) => {
+            if (result[key] === undefined) {
+                updates[key] = value;
+            }
+        });
+        
+        if (Object.keys(updates).length > 0) {
+            chrome.storage.sync.set(updates);
+        }
+    });
+    console.log('이모티콘 도우미 설치/업데이트됨. 기본 설정 확인.');
+    updateIconBadge();
+});
 
-    isAutoSending = true;
-    isPausedBySpamGuard = false;
+chrome.runtime.onStartup.addListener(() => {
+    state = {
+        ...state,
+        isAutoSending: false,
+        isPausedBySpamGuard: false,
+        autoSendTimeoutId: null
+    };
+    updateIconBadge();
+});
+
+function startAutoSend() {
+    if (state.isAutoSending && !state.isPausedBySpamGuard) return;
+
+    state.isAutoSending = true;
+    state.isPausedBySpamGuard = false;
     console.log(`자동 이모티콘 입력 시작 요청됨.`);
     updateIconBadge();
     showToastInActiveTab("자동 입력 시작됨");
@@ -153,15 +207,15 @@ function startAutoSend() {
 }
 
 function stopAutoSend(reason = "사용자 요청") {
-     if (!isAutoSending && !isPausedBySpamGuard) return;
+     if (!state.isAutoSending && !state.isPausedBySpamGuard) return;
 
-    if (autoSendTimeoutId) {
-        clearTimeout(autoSendTimeoutId);
-        autoSendTimeoutId = null;
+    if (state.autoSendTimeoutId) {
+        clearTimeout(state.autoSendTimeoutId);
+        state.autoSendTimeoutId = null;
     }
-    const wasPaused = isPausedBySpamGuard;
-    isAutoSending = false;
-    isPausedBySpamGuard = false;
+    const wasPaused = state.isPausedBySpamGuard;
+    state.isAutoSending = false;
+    state.isPausedBySpamGuard = false;
     console.log(`자동 이모티콘 입력 중지 (${reason})`);
     updateIconBadge();
     if (reason === "사용자 요청" || !wasPaused) {
@@ -179,11 +233,11 @@ function stopAutoSend(reason = "사용자 요청") {
 
 // 도배 방지 일시정지 함수 (Content Script가 요청)
 function pauseAutoSendForSpamGuard() {
-    if (!isAutoSending || isPausedBySpamGuard) return;
-    isPausedBySpamGuard = true;
-    if (autoSendTimeoutId) {
-        clearTimeout(autoSendTimeoutId); // 예약된 timeout 취소
-        autoSendTimeoutId = null;
+    if (!state.isAutoSending || state.isPausedBySpamGuard) return;
+    state.isPausedBySpamGuard = true;
+    if (state.autoSendTimeoutId) {
+        clearTimeout(state.autoSendTimeoutId); // 예약된 timeout 취소
+        state.autoSendTimeoutId = null;
     }
     console.log("자동 입력 일시정지 (도배 방지)");
     updateIconBadge();
@@ -193,8 +247,8 @@ function pauseAutoSendForSpamGuard() {
 
 // 도배 방지 해제 및 자동 입력 재개 함수 (Content Script가 요청)
 function resumeAutoSendFromSpamGuard() {
-    if (!isAutoSending || !isPausedBySpamGuard) return;
-    isPausedBySpamGuard = false;
+    if (!state.isAutoSending || !state.isPausedBySpamGuard) return;
+    state.isPausedBySpamGuard = false;
     console.log("자동 입력 재개 (도배 방지 해제)");
     updateIconBadge();
     showToastInActiveTab("자동 입력 재개됨");
@@ -212,8 +266,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             switch (message.action || message.type) { // action 또는 type 사용
                 case "getAutoSendStatus":
                     sendResponse({
-                        isAutoSending: isAutoSending,
-                        isPaused: isPausedBySpamGuard
+                        isAutoSending: state.isAutoSending,
+                        isPaused: state.isPausedBySpamGuard
                     });
                     break;
                 case "settingsUpdated":
@@ -312,7 +366,7 @@ chrome.commands.onCommand.addListener((command) => {
         console.log("수동 입력 단축키 감지:", command);
         
         // 이미 실행 중이면 무시
-        if (isExecuting) {
+        if (state.isExecuting) {
             console.log("이미 이모티콘 전송이 실행 중입니다.");
             showToastInActiveTab("이모티콘 전송이 실행 중입니다");
             return;
@@ -321,17 +375,17 @@ chrome.commands.onCommand.addListener((command) => {
         const currentTime = Date.now();
         const manualDelay = 1000; // 수동 입력 딜레이 1초로 설정
 
-        if (currentTime - lastExecutionTime >= manualDelay) {
+        if (currentTime - state.lastExecutionTime >= manualDelay) {
             sendEmoticonTriggerToActiveTab(false)  // 수동 입력
                 .then(() => {
-                    lastExecutionTime = Date.now(); // 성공 시에만 시간 갱신
+                    state.lastExecutionTime = Date.now(); // 성공 시에만 시간 갱신
                 }).catch(e => console.error("수동 입력 실패:", e));
         } else {
             console.log(`수동 입력 딜레이(${manualDelay}ms) 대기 중...`);
         }
     } else if (command === "toggle-auto-send") {
         console.log("자동 입력 토글 단축키 감지:", command);
-        if (isAutoSending) {
+        if (state.isAutoSending) {
             stopAutoSend();
         } else {
             startAutoSend();
