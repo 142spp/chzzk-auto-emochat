@@ -224,8 +224,6 @@ async function sendEmoticon(isAuto = false) {
         stopChatObserver(true);
     }
     
-    let sendSuccess = false;
-
     try {
         const prepared = await prepareEmoticonData();
         if (!prepared.success) return false;
@@ -270,11 +268,6 @@ async function sendEmoticon(isAuto = false) {
         // 엔터 이벤트 후 딜레이 추가
         await new Promise(resolve => setTimeout(resolve, 200));
         
-        sendSuccess = true;
-
-        // 초기화 전 딜레이 추가
-        await new Promise(resolve => setTimeout(resolve, 200));
-        
         // 초기화
         editableArea.innerHTML = "";
         editableArea.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
@@ -284,7 +277,7 @@ async function sendEmoticon(isAuto = false) {
         }
 
         // 자동 전송일 경우에만 도배 방지 카운터 업데이트
-        if (isAuto && sendSuccess) {
+        if (isAuto) {
             consecutiveSends++;
             console.log(`연속 전송 횟수 증가: ${consecutiveSends}`);
             if (consecutiveSends >= CONSTANTS.SPAM_GUARD_THRESHOLD && !isSpamGuardPaused) {
@@ -294,18 +287,17 @@ async function sendEmoticon(isAuto = false) {
             }
         }
 
+        return true;
     } catch (error) {
         console.error(`${isAuto ? '자동' : '수동'} 전송 중 오류:`, error.message);
         showToast(`전송 실패: ${error.message}`, CONSTANTS.TOAST_DURATION);
-        sendSuccess = false;
+        return false;
     } finally {
         // Observer 재시작도 자동일 때만
         if (isAuto) {
             startChatObserver(true);
         }
     }
-
-    return sendSuccess;
 }
 
 // --- 채팅 감시 로직 ---
