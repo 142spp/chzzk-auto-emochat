@@ -38,14 +38,14 @@
   "commands": {
     "trigger-emoticon": {
       "suggested_key": {
-        "default": "Ctrl+Shift+E",
+        "default": "Alt+Q",
         "mac": "Command+Shift+E"
       },
       "description": "랜덤 이모티콘 반복 입력 및 전송"
     },
     "toggle-auto-send": {
       "suggested_key": {
-        "default": "Ctrl+Shift+R",
+        "default": "Alt+W",
         "mac": "Command+Shift+R"
       },
       "description": "자동 이모티콘 입력 시작/중지"

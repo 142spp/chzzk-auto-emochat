@@ -257,16 +257,9 @@ async function sendEmoticon(isAuto = false) {
             composed: true
         };
 
-        // keydown -> keypress -> keyup 순서로 이벤트 발생
-        editableArea.dispatchEvent(new KeyboardEvent('keydown', eventOptions));
+        // Enter 키 이벤트 발생
+        await new Promise(resolve => setTimeout(resolve, 100));
         editableArea.dispatchEvent(new KeyboardEvent('keypress', eventOptions));
-        
-        await new Promise(resolve => setTimeout(resolve, 50));
-        
-        editableArea.dispatchEvent(new KeyboardEvent('keyup', eventOptions));
-        
-        // 엔터 이벤트 후 딜레이 추가
-        await new Promise(resolve => setTimeout(resolve, 200));
         
         // 초기화
         editableArea.innerHTML = "";
@@ -286,8 +279,8 @@ async function sendEmoticon(isAuto = false) {
                     .catch(e => console.error("일시정지 메시지 전송 실패:", e));
             }
         }
-
         return true;
+
     } catch (error) {
         console.error(`${isAuto ? '자동' : '수동'} 전송 중 오류:`, error.message);
         showToast(`전송 실패: ${error.message}`, CONSTANTS.TOAST_DURATION);
