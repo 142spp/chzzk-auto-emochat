@@ -12,18 +12,22 @@ console.log("치지직 이모티콘 도우미 content script 로드됨 (v6).");
 
 let cachedEmoticonData = null; // 이모티콘 데이터 캐시 변수
 
-// --- 선택자 ---
-const CHAT_INPUT_SELECTOR = "pre.live_chatting_input_input__2F3Et[contenteditable='true']";
-const SEND_BUTTON_SELECTOR = "button.live_chatting_input_send_button__8KBrn#send_chat_or_donate";
-const EMOTICON_BUTTON_SELECTOR = "button.emoticon_emoticon__q2Sw6"; // 이모티콘 선택 버튼
-const INPUT_CONTAINER_SELECTOR = ".live_chatting_input_container__qA0ad"; // 입력 영역 컨테이너 (실제 클래스 확인!)
-const CHAT_LIST_WRAPPER_SELECTOR = ".live_chatting_list_wrapper__a5XTV"; // 채팅 목록 감시 대상
-const CHAT_ITEM_SELECTOR = ".live_chatting_list_item__0SGhw"; // 개별 채팅 메시지 아이템
-const NICKNAME_SELECTOR = ".live_chatting_message_nickname__UdLXa .name_text__yQG50"; // 닉네임 텍스트 요소
+// --- 상수 정의 ---
+const CONSTANTS = {
+    CHAT_INPUT_SELECTOR: "pre.live_chatting_input_input__2F3Et[contenteditable='true']",
+    SEND_BUTTON_SELECTOR: "button.live_chatting_input_send_button__8KBrn#send_chat_or_donate",
+    EMOTICON_BUTTON_SELECTOR: "button.emoticon_emoticon__q2Sw6",
+    INPUT_CONTAINER_SELECTOR: ".live_chatting_input_container__qA0ad",
+    CHAT_LIST_WRAPPER_SELECTOR: ".live_chatting_list_wrapper__a5XTV",
+    CHAT_ITEM_SELECTOR: ".live_chatting_list_item__0SGhw",
+    NICKNAME_SELECTOR: ".live_chatting_message_nickname__UdLXa .name_text__yQG50",
+    SPAM_GUARD_THRESHOLD: 3,
+    TOAST_DURATION: 2500,
+    AUTO_SEND_DELAY: 150
+};
 
 // --- 도배 방지 관련 변수 ---
 let consecutiveSends = 0; // 연속 전송 횟수
-const SPAM_GUARD_THRESHOLD = 3; // 연속 전송 제한 횟수
 let isSpamGuardPaused = false; // content script 내의 일시정지 상태
 let chatObserver = null; // MutationObserver 인스턴스
 let lastChatMessageNickname = null; // 마지막으로 감지된 채팅 메시지의 닉네임 저장
@@ -31,40 +35,44 @@ let lastChatMessageNickname = null; // 마지막으로 감지된 채팅 메시�
 // --- Helper Functions ---
 
 /**
- * 페이지에서 사용 가능한 이미지 이모티콘 데이터 (플레이스홀더, URL) 목록을 가져옵니다.
- * 캐시된 데이터가 있으면 사용하고, 없으면 새로 가져와 캐시합니다.
+ * 페이지에서 사용 가능한 이미지 이모티콘 데이터를 가져옵니다.
  * @returns {Array<{placeholder: string, imageUrl: string}>} 이모티콘 데이터 배열
+ * @throws {Error} 이모티콘 데이터를 찾을 수 없는 경우
  */
 function getAvailableEmoticonData() {
-    // 1. 캐시 확인
-    if (cachedEmoticonData && cachedEmoticonData.length > 0) {
+    if (cachedEmoticonData?.length > 0) {
         console.log("캐시된 이모티콘 데이터 사용.");
         return cachedEmoticonData;
     }
 
-    // 2. 캐시 없으면 새로 가져오기
     console.log("새 이모티콘 데이터 가져오는 중...");
-    const emoticonButtons = document.querySelectorAll(EMOTICON_BUTTON_SELECTOR);
-    const data = [];
-    emoticonButtons.forEach(button => {
-        const img = button.querySelector('img');
-        const placeholder = img?.getAttribute('alt'); // 예: {:d_47:}
-        const imageUrl = img?.getAttribute('src');
-        // placeholder 형식 ({:key:}) 확인 및 URL 존재 여부 확인
-        if (placeholder && /^\{:.+:\}$/.test(placeholder) && imageUrl) {
-            data.push({ placeholder: placeholder, imageUrl: imageUrl });
-        }
-    });
-
-    // 3. 데이터가 있을 경우에만 캐시
-    if (data.length > 0) {
-        cachedEmoticonData = data; // 가져온 데이터를 캐시에 저장
-        console.log(`새 이모티콘 데이터 ${data.length}개 캐시됨.`);
-    } else {
-         console.warn("이모티콘 데이터를 찾을 수 없어 캐시하지 않음. 이모티콘 팝업이 로드되지 않았거나 선택자가 변경되었을 수 있습니다.");
+    const emoticonButtons = document.querySelectorAll(CONSTANTS.EMOTICON_BUTTON_SELECTOR);
+    
+    if (emoticonButtons.length === 0) {
+        throw new Error("이모티콘 버튼을 찾을 수 없습니다. 이모티콘 팝업이 열려있는지 확인하세요.");
     }
 
-    return data; // 가져온 데이터 반환
+    const data = Array.from(emoticonButtons).map(button => {
+        const img = button.querySelector('img');
+        if (!img) return null;
+        
+        const placeholder = img.getAttribute('alt');
+        const imageUrl = img.getAttribute('src');
+        
+        if (!placeholder || !/^\{:.+:\}$/.test(placeholder) || !imageUrl) {
+            return null;
+        }
+        
+        return { placeholder, imageUrl };
+    }).filter(Boolean);
+
+    if (data.length === 0) {
+        throw new Error("유효한 이모티콘 데이터를 찾을 수 없습니다.");
+    }
+
+    cachedEmoticonData = data;
+    console.log(`새 이모티콘 데이터 ${data.length}개 캐시됨.`);
+    return data;
 }
 
 /**
@@ -148,68 +156,61 @@ async function setMainWorldVariable(variableName, value) {
 
 /**
  * 이모티콘 데이터를 준비하고 전송할 HTML과 워킹 데이터를 생성합니다.
- * @returns {Promise<{success: boolean, data: {editableArea: Element, newHtmlString: string, newWorkingChat: string, newEmoticonMap: Object}}>}
+ * @returns {Promise<{success: boolean, data?: {editableArea: Element, newHtmlString: string, newWorkingChat: string, newEmoticonMap: Object}, error?: string}>}
  */
 async function prepareEmoticonData() {
-    // 1. 설정 및 이모티콘 데이터 가져오기
-    const settings = await chrome.storage.sync.get(['minRepetitions', 'maxRepetitions']);
-    const availableEmoticons = getAvailableEmoticonData();
+    try {
+        const settings = await chrome.storage.sync.get(['minRepetitions', 'maxRepetitions']);
+        const availableEmoticons = getAvailableEmoticonData();
 
-    if (availableEmoticons.length === 0) {
-        showToast("사용 가능한 이모티콘이 없습니다. 팝업을 한 번 열어보세요.", 3000);
-        return { success: false };
-    }
+        const minReps = Math.max(1, settings.minRepetitions || 1);
+        const maxReps = Math.max(minReps, settings.maxRepetitions || 1);
+        const actualRepetitions = Math.floor(Math.random() * (maxReps - minReps + 1)) + minReps;
 
-    // 2. 반복 횟수 계산
-    const minReps = settings.minRepetitions || 1;
-    let maxReps = settings.maxRepetitions || 1;
-    if (minReps > maxReps) maxReps = minReps;
-    const actualRepetitions = Math.floor(Math.random() * (maxReps - minReps + 1)) + minReps;
-    console.log(`반복 횟수: ${actualRepetitions} (범위: ${minReps}~${maxReps})`);
+        const randomIndex = Math.floor(Math.random() * availableEmoticons.length);
+        const chosenEmoticon = availableEmoticons[randomIndex];
+        const { placeholder, imageUrl } = chosenEmoticon;
+        const emojiKey = placeholder.replace(/[{}:]/g, "");
 
-    // 3. 랜덤 이모티콘 선택
-    const randomIndex = Math.floor(Math.random() * availableEmoticons.length);
-    const chosenEmoticon = availableEmoticons[randomIndex];
-    const placeholder = chosenEmoticon.placeholder;
-    const imageUrl = chosenEmoticon.imageUrl;
-    const emojiKey = placeholder.replace(/[{}:]/g, "");
+        const chatInputContainer = document.querySelector(CONSTANTS.INPUT_CONTAINER_SELECTOR);
+        const editableArea = chatInputContainer?.querySelector(CONSTANTS.CHAT_INPUT_SELECTOR);
+        
+        if (!editableArea) {
+            throw new Error("채팅 입력 영역을 찾을 수 없습니다.");
+        }
 
-    console.log(`선택된 이모티콘: ${placeholder}`);
+        const currentChatVar = await getMainWorldVariable('__workingChat') ?? "";
+        const currentEmoticonMap = await getMainWorldVariable('__workingEmoticon') ?? {};
+        
+        let newHtmlString = currentChatVar;
+        let newWorkingChat = currentChatVar;
+        const newEmoticonMap = { ...currentEmoticonMap };
 
-    // 4. 채팅 입력 영역 찾기
-    const chatInputContainer = document.querySelector(INPUT_CONTAINER_SELECTOR);
-    const editableArea = chatInputContainer?.querySelector(CHAT_INPUT_SELECTOR);
-    if (!editableArea) {
-        console.error("채팅 입력 영역을 찾을 수 없습니다.");
-        return { success: false };
-    }
-
-    // 5. 현재 상태 가져오기
-    const currentChatVar = await getMainWorldVariable('__workingChat') ?? "";
-    const currentEmoticonMap = await getMainWorldVariable('__workingEmoticon') ?? {};
-    
-    // 6. 새 채팅 데이터 생성
-    let newHtmlString = currentChatVar;
-    let newWorkingChat = currentChatVar;
-    const newEmoticonMap = { ...currentEmoticonMap };
-
-    for (let i = 0; i < actualRepetitions; i++) {
-        newHtmlString += `<img src="${imageUrl}" title="${placeholder}" alt="${placeholder}" style="vertical-align: middle; height: 20px; margin: 0 1px;">`;
-        newWorkingChat += placeholder;
+        // DOM 조작 최적화를 위해 한 번에 HTML 생성
+        const emoticonHtml = `<img src="${imageUrl}" title="${placeholder}" alt="${placeholder}" style="vertical-align: middle; height: 20px; margin: 0 1px;">`;
+        newHtmlString += emoticonHtml.repeat(actualRepetitions);
+        newWorkingChat += placeholder.repeat(actualRepetitions);
+        
         if (!newEmoticonMap[emojiKey]) {
             newEmoticonMap[emojiKey] = imageUrl;
         }
-    }
 
-    return {
-        success: true,
-        data: {
-            editableArea,
-            newHtmlString,
-            newWorkingChat,
-            newEmoticonMap
-        }
-    };
+        return {
+            success: true,
+            data: {
+                editableArea,
+                newHtmlString,
+                newWorkingChat,
+                newEmoticonMap
+            }
+        };
+    } catch (error) {
+        console.error("이모티콘 데이터 준비 중 오류 발생:", error);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
 }
 
 /**
@@ -244,7 +245,7 @@ async function sendEmoticon(isAuto = false) {
 
         // 자동 전송일 경우에만 딜레이 추가
         if (isAuto) {
-            await new Promise(resolve => setTimeout(resolve, 150));
+            await new Promise(resolve => setTimeout(resolve, CONSTANTS.AUTO_SEND_DELAY));
         }
 
         // 키보드 이벤트 시퀀스 발생
@@ -286,7 +287,7 @@ async function sendEmoticon(isAuto = false) {
         if (isAuto && sendSuccess) {
             consecutiveSends++;
             console.log(`연속 전송 횟수 증가: ${consecutiveSends}`);
-            if (consecutiveSends >= SPAM_GUARD_THRESHOLD && !isSpamGuardPaused) {
+            if (consecutiveSends >= CONSTANTS.SPAM_GUARD_THRESHOLD && !isSpamGuardPaused) {
                 isSpamGuardPaused = true;
                 chrome.runtime.sendMessage({ action: "pauseAutoSend" })
                     .catch(e => console.error("일시정지 메시지 전송 실패:", e));
@@ -295,7 +296,7 @@ async function sendEmoticon(isAuto = false) {
 
     } catch (error) {
         console.error(`${isAuto ? '자동' : '수동'} 전송 중 오류:`, error.message);
-        showToast(`전송 실패: ${error.message}`, 3000);
+        showToast(`전송 실패: ${error.message}`, CONSTANTS.TOAST_DURATION);
         sendSuccess = false;
     } finally {
         // Observer 재시작도 자동일 때만
@@ -314,7 +315,7 @@ async function sendEmoticon(isAuto = false) {
  * @param {boolean} [isResuming=false] - 임시 중지 후 재개하는 경우 true
  */
 function startChatObserver(isResuming = false) {
-    const chatListWrapper = document.querySelector(CHAT_LIST_WRAPPER_SELECTOR);
+    const chatListWrapper = document.querySelector(CONSTANTS.CHAT_LIST_WRAPPER_SELECTOR);
     if (!chatListWrapper) {
         console.error("채팅 목록 wrapper를 찾을 수 없어 감시자를 시작할 수 없습니다.");
         if (!isResuming) setTimeout(() => startChatObserver(false), 1000); // 1초 후 재시도
@@ -339,7 +340,7 @@ function startChatObserver(isResuming = false) {
         consecutiveSends = 0;
         isSpamGuardPaused = false;
         lastChatMessageNickname = null;
-        const lastMessage = chatListWrapper.querySelector(`${CHAT_ITEM_SELECTOR}:last-child ${NICKNAME_SELECTOR}`);
+        const lastMessage = chatListWrapper.querySelector(`${CONSTANTS.CHAT_ITEM_SELECTOR}:last-child ${CONSTANTS.NICKNAME_SELECTOR}`);
         if(lastMessage) {
             lastChatMessageNickname = lastMessage.textContent?.trim();
             console.log("초기 마지막 메시지 닉네임:", lastChatMessageNickname);
@@ -358,8 +359,8 @@ function handleChatMutation(mutationsList) {
     for (const mutation of mutationsList) {
         if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
             mutation.addedNodes.forEach(node => {
-                if (node.nodeType === Node.ELEMENT_NODE && node.matches(CHAT_ITEM_SELECTOR)) {
-                    const nicknameElement = node.querySelector(NICKNAME_SELECTOR);
+                if (node.nodeType === Node.ELEMENT_NODE && node.matches(CONSTANTS.CHAT_ITEM_SELECTOR)) {
+                    const nicknameElement = node.querySelector(CONSTANTS.NICKNAME_SELECTOR);
                     const currentNickname = nicknameElement?.textContent?.trim();
                     if (currentNickname) {
                         console.log(`새 메시지 감지: ${currentNickname}`);
