@@ -1,54 +1,42 @@
 {
   "manifest_version": 3,
-  "name": "치지직 랜덤 이모티콘 도우미",
-  "version": "1.1", 
-  "description": "단축키를 눌러 치지직 채팅창에 설정된 랜덤 이모티콘을 반복 입력하고 전송합니다. 자동 입력 토글 기능 포함.",
+  "name": "치지직 이모티콘 도우미",
+  "version": "1.0",
+  "description": "치지직에서 이모티콘을 자동으로 입력하는 도우미",
   "permissions": [
     "storage",
     "activeTab",
-    "scripting",
-    "commands"
+    "scripting"
   ],
   "host_permissions": [
     "*://*.chzzk.naver.com/*"
   ],
-  "action": {
-    "default_popup": "popup.html",
-    "default_icon": {
-      "16": "icons/icon16.png",
-      "48": "icons/icon48.png",
-      "128": "icons/icon128.png"
-    }
-  },
-  "icons": {
-    "16": "icons/icon16.png",
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
-  },
   "background": {
     "service_worker": "src/background.js"
   },
   "content_scripts": [
     {
       "matches": ["*://*.chzzk.naver.com/*"],
-      "js": ["src/content.js"],
-      "run_at": "document_idle"
+      "js": ["src/content.js"]
     }
   ],
+  "action": {
+    "default_popup": "src/popup.html"
+  },
   "commands": {
     "trigger-emoticon": {
       "suggested_key": {
-        "default": "Alt+Q",
+        "default": "Ctrl+Shift+E",
         "mac": "Command+Shift+E"
       },
-      "description": "랜덤 이모티콘 반복 입력 및 전송"
+      "description": "이모티콘 전송"
     },
     "toggle-auto-send": {
       "suggested_key": {
-        "default": "Alt+W",
-        "mac": "Command+Shift+R"
+        "default": "Ctrl+Shift+A",
+        "mac": "Command+Shift+A"
       },
-      "description": "자동 이모티콘 입력 시작/중지"
+      "description": "자동 전송 토글"
     }
   }
 }
