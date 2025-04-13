@@ -48,8 +48,13 @@ function saveSettings() {
         showStatus('반복 횟수는 1 이상이어야 합니다.', 'error');
         return;
     }
+    if (minRepetitions >100 || maxRepetitions > 100) {
+        showStatus('반복 횟수는 100 이하여야 합니다.', 'error');
+        return;
+    }
     if (minRepetitions > maxRepetitions) {
         showStatus('최대 반복 횟수는 최소 반복 횟수보다 크거나 같아야 합니다.', 'error');
+        maxRepetitionsInput.value = 100;
         return;
     }
 
