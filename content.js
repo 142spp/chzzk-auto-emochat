@@ -1,5 +1,5 @@
 /**
- * content.js - 치지직 랜덤 이모티콘 도우미 (v6 - DOM 조작 강화)
+ * content.js - 치지직 랜덤 이모티콘 도우미 (v7 - 모듈화 및 에러 처리 개선)
  * 기능:
  * - 설정된 최소/최대 횟수 범위 내 랜덤 횟수로 이모티콘 반복 입력
  * - 이미지 이모티콘 사용 (DOM 직접 조작 및 input 이벤트 발생)
@@ -7,275 +7,319 @@
  * - 자동 입력 (Background 제어), 랜덤 간격
  * - 토스트 메시지 표시
  */
-console.log("치지직 이모티콘 도우미 content script 로드됨 (v6).");
-
-let cachedEmoticonData = null; // 이모티콘 데이터 캐시 변수
+console.log("치지직 이모티콘 도우미 content script 로드됨 (v7).");
 
 // --- 상수 정의 ---
 const CONSTANTS = {
-    CHAT_INPUT_SELECTOR: "pre.live_chatting_input_input__2F3Et[contenteditable='true']",
-    SEND_BUTTON_SELECTOR: "button.live_chatting_input_send_button__8KBrn#send_chat_or_donate",
-    EMOTICON_BUTTON_SELECTOR: "button.emoticon_emoticon__q2Sw6",
-    INPUT_CONTAINER_SELECTOR: ".live_chatting_input_container__qA0ad",
-    TOAST_DURATION: 2500,
-    AUTO_SEND_DELAY: 150
+    SELECTORS: {
+        CHAT_INPUT: "pre.live_chatting_input_input__2F3Et[contenteditable='true']",
+        SEND_BUTTON: "button.live_chatting_input_send_button__8KBrn#send_chat_or_donate",
+        EMOTICON_BUTTON: "button.emoticon_emoticon__q2Sw6",
+        INPUT_CONTAINER: ".live_chatting_input_container__qA0ad"
+    },
+    TOAST: {
+        DURATION: 2500,
+        ID: 'chzzkMacroToast'
+    },
+    AUTO_SEND_DELAY: 150,
+    MAIN_WORLD_VARS: {
+        WORKING_CHAT: '__workingChat',
+        WORKING_EMOTICON: '__workingEmoticon'
+    }
 };
 
-// --- Helper Functions ---
-
-/**
- * 페이지에서 사용 가능한 이미지 이모티콘 데이터를 가져옵니다.
- * @returns {Array<{placeholder: string, imageUrl: string}>} 이모티콘 데이터 배열
- * @throws {Error} 이모티콘 데이터를 찾을 수 없는 경우
- */
-function getAvailableEmoticonData() {
-    if (cachedEmoticonData?.length > 0) {
-        console.log("캐시된 이모티콘 데이터 사용.");
-        return cachedEmoticonData;
+// --- 이모티콘 관리 클래스 ---
+class EmoticonManager {
+    constructor() {
+        this.cachedData = null;
     }
 
-    console.log("새 이모티콘 데이터 가져오는 중...");
-    const emoticonButtons = document.querySelectorAll(CONSTANTS.EMOTICON_BUTTON_SELECTOR);
-
-    if (emoticonButtons.length === 0) {
-        throw new Error("이모티콘 버튼을 찾을 수 없습니다. 이모티콘 팝업이 열려있는지 확인하세요.");
-    }
-
-    const data = Array.from(emoticonButtons).map(button => {
-        const img = button.querySelector('img');
-        if (!img) return null;
-
-        const placeholder = img.getAttribute('alt');
-        const imageUrl = img.getAttribute('src');
-
-        if (!placeholder || !/^\{:.+:\}$/.test(placeholder) || !imageUrl) {
-            return null;
+    /**
+     * 사용 가능한 이모티콘 데이터를 가져옵니다.
+     * @returns {Array<{placeholder: string, imageUrl: string}>}
+     * @throws {Error} 이모티콘 데이터를 찾을 수 없는 경우
+     */
+    getAvailableEmoticonData() {
+        if (this.cachedData?.length > 0) {
+            console.log("캐시된 이모티콘 데이터 사용.");
+            return this.cachedData;
         }
 
-        return { placeholder, imageUrl };
-    }).filter(Boolean);
+        console.log("새 이모티콘 데이터 가져오는 중...");
+        const emoticonButtons = document.querySelectorAll(CONSTANTS.SELECTORS.EMOTICON_BUTTON);
 
-    if (data.length === 0) {
-        throw new Error("유효한 이모티콘 데이터를 찾을 수 없습니다.");
+        if (emoticonButtons.length === 0) {
+            throw new Error("이모티콘 버튼을 찾을 수 없습니다. 이모티콘 팝업이 열려있는지 확인하세요.");
+        }
+
+        const data = Array.from(emoticonButtons)
+            .map(button => {
+                const img = button.querySelector('img');
+                if (!img) return null;
+
+                const placeholder = img.getAttribute('alt');
+                const imageUrl = img.getAttribute('src');
+
+                if (!placeholder || !/^\{:.+:\}$/.test(placeholder) || !imageUrl) {
+                    return null;
+                }
+
+                return { placeholder, imageUrl };
+            })
+            .filter(Boolean);
+
+        if (data.length === 0) {
+            throw new Error("유효한 이모티콘 데이터를 찾을 수 없습니다.");
+        }
+
+        this.cachedData = data;
+        console.log(`새 이모티콘 데이터 ${data.length}개 캐시됨.`);
+        return data;
     }
 
-    cachedEmoticonData = data;
-    console.log(`새 이모티콘 데이터 ${data.length}개 캐시됨.`);
-    return data;
-}
+    /**
+     * 이모티콘 데이터를 준비합니다.
+     * @returns {Promise<{success: boolean, data?: {editableArea: Element, newHtmlString: string, newWorkingChat: string, newEmoticonMap: Object}, error?: string}>}
+     */
+    async prepareEmoticonData() {
+        try {
+            const settings = await chrome.storage.sync.get(['minRepetitions', 'maxRepetitions']);
+            const availableEmoticons = this.getAvailableEmoticonData();
 
-/**
- * 화면 하단 중앙에 토스트 메시지를 표시합니다.
- * @param {string} message - 표시할 메시지 내용
- * @param {number} [duration=2500] - 메시지 표시 시간 (ms)
- */
-function showToast(message, duration = CONSTANTS.TOAST_DURATION) {
-    const existingToast = document.getElementById('chzzkMacroToast');
-    if (existingToast) {
-        existingToast.remove(); // 이전 토스트 제거
-    }
+            const minReps = Math.max(1, settings.minRepetitions || 1);
+            const maxReps = Math.max(minReps, settings.maxRepetitions || 1);
+            const actualRepetitions = Math.floor(Math.random() * (maxReps - minReps + 1)) + minReps;
 
-    const toast = document.createElement('div');
-    toast.id = 'chzzkMacroToast';
-    toast.textContent = message;
-    Object.assign(toast.style, {
-        position: 'fixed',
-        bottom: '30px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        backgroundColor: 'rgba(0, 0, 0, 0.7)',
-        color: 'white',
-        padding: '10px 20px',
-        borderRadius: '5px',
-        zIndex: '9999',
-        fontSize: '14px',
-        opacity: '0',
-        transition: 'opacity 0.3s ease-in-out'
-    });
+            const randomIndex = Math.floor(Math.random() * availableEmoticons.length);
+            const chosenEmoticon = availableEmoticons[randomIndex];
+            const { placeholder, imageUrl } = chosenEmoticon;
+            const emojiKey = placeholder.replace(/[{}:]/g, "");
 
-    document.body.appendChild(toast);
+            const chatInputContainer = document.querySelector(CONSTANTS.SELECTORS.INPUT_CONTAINER);
+            const editableArea = chatInputContainer?.querySelector(CONSTANTS.SELECTORS.CHAT_INPUT);
 
-    // Fade-in
-    setTimeout(() => {
-        toast.style.opacity = '1';
-    }, 50);
-
-    // Fade-out and remove
-    setTimeout(() => {
-        toast.style.opacity = '0';
-        setTimeout(() => {
-            if (toast.parentNode) {
-                toast.remove();
+            if (!editableArea) {
+                throw new Error("채팅 입력 영역을 찾을 수 없습니다.");
             }
-        }, 300); // transition 시간 후 제거
-    }, duration);
-}
 
-/**
- * Main World의 window 객체 변수 값을 가져옵니다. (Background Script 통신 필요)
- * @param {string} variableName - 가져올 변수 이름 (e.g., '__workingChat')
- * @returns {Promise<any|undefined>} 변수 값 또는 오류 시 undefined
- */
-async function getMainWorldVariable(variableName) {
-    try {
-        // Background에 'getVariable' 메시지 전송
-        return await chrome.runtime.sendMessage({ type: "getVariable", value: variableName });
-    } catch (error) {
-        console.error(`Error getting main world variable ${variableName}:`, error);
-        return undefined;
-    }
-}
+            const currentChatVar = await MainWorldManager.getVariable(CONSTANTS.MAIN_WORLD_VARS.WORKING_CHAT) ?? "";
+            const currentEmoticonMap = await MainWorldManager.getVariable(CONSTANTS.MAIN_WORLD_VARS.WORKING_EMOTICON) ?? {};
 
-/**
- * Main World의 window 객체 변수 값을 설정합니다. (Background Script 통신 필요)
- * @param {string} variableName - 설정할 변수 이름
- * @param {any} value - 설정할 값
- * @returns {Promise<boolean>} 성공 시 true, 실패 시 false
- */
-async function setMainWorldVariable(variableName, value) {
-     try {
-        // Background에 'setVariable' 메시지 전송
-        const response = await chrome.runtime.sendMessage({ type: "setVariable", value: { name: variableName, value: value } });
-        return response && response.success;
-    } catch (error) {
-        console.error(`Error setting main world variable ${variableName}:`, error);
-        return false;
-    }
-}
+            const emoticonHtml = `<img src="${imageUrl}" title="${placeholder}" alt="${placeholder}" style="vertical-align: middle; height: 20px; margin: 0 1px;">`;
+            const newHtmlString = currentChatVar + emoticonHtml.repeat(actualRepetitions);
+            const newWorkingChat = currentChatVar + placeholder.repeat(actualRepetitions);
+            const newEmoticonMap = { ...currentEmoticonMap };
 
-/**
- * 이모티콘 데이터를 준비하고 전송할 HTML과 워킹 데이터를 생성합니다.
- * @returns {Promise<{success: boolean, data?: {editableArea: Element, newHtmlString: string, newWorkingChat: string, newEmoticonMap: Object}, error?: string}>}
- */
-async function prepareEmoticonData() {
-    try {
-        const settings = await chrome.storage.sync.get(['minRepetitions', 'maxRepetitions']);
-        const availableEmoticons = getAvailableEmoticonData();
-
-        const minReps = Math.max(1, settings.minRepetitions || 1);
-        const maxReps = Math.max(minReps, settings.maxRepetitions || 1);
-        const actualRepetitions = Math.floor(Math.random() * (maxReps - minReps + 1)) + minReps;
-
-        const randomIndex = Math.floor(Math.random() * availableEmoticons.length);
-        const chosenEmoticon = availableEmoticons[randomIndex];
-        const { placeholder, imageUrl } = chosenEmoticon;
-        const emojiKey = placeholder.replace(/[{}:]/g, "");
-
-        const chatInputContainer = document.querySelector(CONSTANTS.INPUT_CONTAINER_SELECTOR);
-        const editableArea = chatInputContainer?.querySelector(CONSTANTS.CHAT_INPUT_SELECTOR);
-
-        if (!editableArea) {
-            throw new Error("채팅 입력 영역을 찾을 수 없습니다.");
-        }
-
-        const currentChatVar = await getMainWorldVariable('__workingChat') ?? "";
-        const currentEmoticonMap = await getMainWorldVariable('__workingEmoticon') ?? {};
-
-        let newHtmlString = currentChatVar;
-        let newWorkingChat = currentChatVar;
-        const newEmoticonMap = { ...currentEmoticonMap };
-
-        // DOM 조작 최적화를 위해 한 번에 HTML 생성
-        const emoticonHtml = `<img src="${imageUrl}" title="${placeholder}" alt="${placeholder}" style="vertical-align: middle; height: 20px; margin: 0 1px;">`;
-        newHtmlString += emoticonHtml.repeat(actualRepetitions);
-        newWorkingChat += placeholder.repeat(actualRepetitions);
-
-        if (!newEmoticonMap[emojiKey]) {
-            newEmoticonMap[emojiKey] = imageUrl;
-        }
-
-        return {
-            success: true,
-            data: {
-                editableArea,
-                newHtmlString,
-                newWorkingChat,
-                newEmoticonMap
+            if (!newEmoticonMap[emojiKey]) {
+                newEmoticonMap[emojiKey] = imageUrl;
             }
-        };
-    } catch (error) {
-        console.error("이모티콘 데이터 준비 중 오류 발생:", error);
-        return {
-            success: false,
-            error: error.message
-        };
+
+            return {
+                success: true,
+                data: {
+                    editableArea,
+                    newHtmlString,
+                    newWorkingChat,
+                    newEmoticonMap
+                }
+            };
+        } catch (error) {
+            console.error("이모티콘 데이터 준비 중 오류 발생:", error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
     }
-}
 
-/**
- * 이모티콘을 전송합니다.
- * @param {boolean} isAuto - 자동 전송 여부
- * @returns {Promise<boolean>} 전송 성공 여부
- */
-async function sendEmoticon(isAuto = false) {
-    try {
-        const prepared = await prepareEmoticonData();
-        if (!prepared.success) return false;
+    /**
+     * 이모티콘을 전송합니다.
+     * @param {boolean} isAuto - 자동 전송 여부
+     * @returns {Promise<boolean>} 전송 성공 여부
+     */
+    async sendEmoticon(isAuto = false) {
+        try {
+            const prepared = await this.prepareEmoticonData();
+            if (!prepared.success) return false;
 
-        const { editableArea, newHtmlString, newWorkingChat, newEmoticonMap } = prepared.data;
+            const { editableArea, newHtmlString, newWorkingChat, newEmoticonMap } = prepared.data;
 
-        // DOM 업데이트
-        editableArea.focus();
-        editableArea.innerHTML = newHtmlString;
-        editableArea.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+            // DOM 업데이트
+            editableArea.focus();
+            editableArea.innerHTML = newHtmlString;
+            editableArea.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
 
-        // Main World 변수 업데이트
-        if (typeof await getMainWorldVariable('__workingChat') !== 'undefined') {
-            await setMainWorldVariable('__workingChat', newWorkingChat);
-            await setMainWorldVariable('__workingEmoticon', newEmoticonMap);
-        }
+            // Main World 변수 업데이트
+            if (typeof await MainWorldManager.getVariable(CONSTANTS.MAIN_WORLD_VARS.WORKING_CHAT) !== 'undefined') {
+                await MainWorldManager.setVariable(CONSTANTS.MAIN_WORLD_VARS.WORKING_CHAT, newWorkingChat);
+                await MainWorldManager.setVariable(CONSTANTS.MAIN_WORLD_VARS.WORKING_EMOTICON, newEmoticonMap);
+            }
 
-        // 자동 전송일 경우에만 딜레이 추가
-        if (isAuto) {
-            await new Promise(resolve => setTimeout(resolve, CONSTANTS.AUTO_SEND_DELAY));
-        }
+            // 자동 전송일 경우에만 딜레이 추가
+            if (isAuto) {
+                await new Promise(resolve => setTimeout(resolve, CONSTANTS.AUTO_SEND_DELAY));
+            }
 
-        // Enter 키 이벤트 발생
-        await new Promise(resolve => setTimeout(resolve, 100));
-        editableArea.dispatchEvent(new KeyboardEvent('keypress', {
-            key: 'Enter',
-            code: 'Enter',
-            keyCode: 13,
-            which: 13,
-            bubbles: true,
-            cancelable: true,
-            composed: true
-        }));
+            // Enter 키 이벤트 발생
+            await new Promise(resolve => setTimeout(resolve, 100));
+            editableArea.dispatchEvent(new KeyboardEvent('keypress', {
+                key: 'Enter',
+                code: 'Enter',
+                keyCode: 13,
+                which: 13,
+                bubbles: true,
+                cancelable: true,
+                composed: true
+            }));
 
-        // 초기화
-        editableArea.innerHTML = "";
-        editableArea.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-        if (typeof await getMainWorldVariable('__workingChat') !== 'undefined') {
-            await setMainWorldVariable('__workingChat', "");
-            await setMainWorldVariable('__workingEmoticon', {});
-        }
+            // 초기화
+            editableArea.innerHTML = "";
+            editableArea.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+            if (typeof await MainWorldManager.getVariable(CONSTANTS.MAIN_WORLD_VARS.WORKING_CHAT) !== 'undefined') {
+                await MainWorldManager.setVariable(CONSTANTS.MAIN_WORLD_VARS.WORKING_CHAT, "");
+                await MainWorldManager.setVariable(CONSTANTS.MAIN_WORLD_VARS.WORKING_EMOTICON, {});
+            }
 
-        return true;
-
-    } catch (error) {
-        console.error(`${isAuto ? '자동' : '수동'} 전송 중 오류:`, error.message);
-        showToast(`전송 실패: ${error.message}`, CONSTANTS.TOAST_DURATION);
-        return false;
-    }
-}
-
-// 메시지 리스너 수정
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    console.log("Background로부터 메시지 수신:", request.action);
-    switch (request.action) {
-        case "injectAndSendTrigger":
-            sendEmoticon(request.isAuto)  // isAuto 값을 전달받아 사용
-                .then(success => sendResponse({ success }))
-                .catch(error => {
-                    console.error("메시지 처리 중 오류:", error);
-                    sendResponse({ success: false, error: error.message })
-                });
             return true;
-        case "showToast":
-            showToast(request.message);
-            sendResponse({ success: true });
-            break;
+        } catch (error) {
+            console.error("이모티콘 전송 중 오류 발생:", error);
+            return false;
+        }
     }
+}
+
+// --- Main World 관리 클래스 ---
+class MainWorldManager {
+    /**
+     * Main World의 변수 값을 가져옵니다.
+     * @param {string} variableName - 변수 이름
+     * @returns {Promise<any>}
+     */
+    static async getVariable(variableName) {
+        try {
+            return await chrome.runtime.sendMessage({ type: "getVariable", value: variableName });
+        } catch (error) {
+            console.error(`Main World 변수 가져오기 실패 (${variableName}):`, error);
+            return undefined;
+        }
+    }
+
+    /**
+     * Main World의 변수 값을 설정합니다.
+     * @param {string} variableName - 변수 이름
+     * @param {any} value - 설정할 값
+     * @returns {Promise<boolean>}
+     */
+    static async setVariable(variableName, value) {
+        try {
+            const response = await chrome.runtime.sendMessage({ 
+                type: "setVariable", 
+                value: { name: variableName, value: value } 
+            });
+            return response && response.success;
+        } catch (error) {
+            console.error(`Main World 변수 설정 실패 (${variableName}):`, error);
+            return false;
+        }
+    }
+}
+
+// --- UI 관리 클래스 ---
+class UIManager {
+    /**
+     * 토스트 메시지를 표시합니다.
+     * @param {string} message - 메시지 내용
+     * @param {number} [duration=2500] - 표시 시간 (ms)
+     */
+    static showToast(message, duration = CONSTANTS.TOAST.DURATION) {
+        const existingToast = document.getElementById(CONSTANTS.TOAST.ID);
+        if (existingToast) {
+            existingToast.remove();
+        }
+
+        const toast = document.createElement('div');
+        toast.id = CONSTANTS.TOAST.ID;
+        toast.textContent = message;
+        Object.assign(toast.style, {
+            position: 'fixed',
+            bottom: '30px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            color: 'white',
+            padding: '10px 20px',
+            borderRadius: '5px',
+            zIndex: '9999',
+            fontSize: '14px',
+            opacity: '0',
+            transition: 'opacity 0.3s ease-in-out'
+        });
+
+        document.body.appendChild(toast);
+
+        // Fade-in
+        setTimeout(() => {
+            toast.style.opacity = '1';
+        }, 50);
+
+        // Fade-out and remove
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.remove();
+                }
+            }, 300);
+        }, duration);
+    }
+}
+
+// --- 메시지 핸들러 클래스 ---
+class MessageHandler {
+    constructor(emoticonManager) {
+        this.emoticonManager = emoticonManager;
+    }
+
+    /**
+     * 메시지를 처리합니다.
+     * @param {Object} message - 메시지 객체
+     * @param {Object} sender - 송신자 정보
+     * @param {Function} sendResponse - 응답 함수
+     */
+    async handleMessage(message, sender, sendResponse) {
+        console.log("Content script 메시지 수신:", message);
+
+        try {
+            switch (message.action) {
+                case "showToast":
+                    UIManager.showToast(message.message);
+                    sendResponse({ success: true });
+                    break;
+
+                case "injectAndSendTrigger":
+                    const success = await this.emoticonManager.sendEmoticon(message.isAuto);
+                    sendResponse({ success });
+                    break;
+
+                default:
+                    console.warn("알 수 없는 메시지 타입:", message.action);
+                    sendResponse({ success: false, error: "알 수 없는 메시지 타입" });
+            }
+        } catch (error) {
+            console.error("메시지 처리 중 오류 발생:", error);
+            sendResponse({ success: false, error: error.message });
+        }
+    }
+}
+
+// --- 초기화 ---
+const emoticonManager = new EmoticonManager();
+const messageHandler = new MessageHandler(emoticonManager);
+
+// 메시지 리스너 등록
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    messageHandler.handleMessage(message, sender, sendResponse);
+    return true; // 비동기 응답을 위해 true 반환
 });
 
 // --- 페이지 로드 시 초기화 (더 이상 필요 없음) ---
