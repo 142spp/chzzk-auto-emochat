@@ -276,10 +276,10 @@ class SettingsManager {
      * UI에서 설정을 가져옵니다.
      */
     getSettingsFromUI() {
-        this.settings.minRepetitions = parseInt(document.getElementById('minRepetitions').value) || 1;
-        this.settings.maxRepetitions = parseInt(document.getElementById('maxRepetitions').value) || 1;
-        this.settings.minDelay = parseInt(document.getElementById('minDelay').value) || 3000;
-        this.settings.maxDelay = parseInt(document.getElementById('maxDelay').value) || 6000;
+        this.settings.minRepetitions = parseInt(document.getElementById('minRepetitions').value) || CONSTANTS.DEFAULT_SETTINGS.minRepetitions;
+        this.settings.maxRepetitions = parseInt(document.getElementById('maxRepetitions').value) || CONSTANTS.DEFAULT_SETTINGS.maxRepetitions;
+        this.settings.minDelay = parseInt(document.getElementById('minDelay').value) || CONSTANTS.DEFAULT_SETTINGS.minDelay;
+        this.settings.maxDelay = parseInt(document.getElementById('maxDelay').value) || CONSTANTS.DEFAULT_SETTINGS.maxDelay;
     }
 }
 
