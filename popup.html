@@ -48,9 +48,9 @@
             box-shadow: 0 2px 4px rgba(0,0,0,0.05);
         }
 
-        .input-group label {
+        .input-group > label {
             display: block;
-            margin-bottom: 8px;
+            margin-bottom: 12px;
             color: var(--text-color);
             font-weight: 500;
         }
@@ -62,8 +62,20 @@
             margin-bottom: 10px;
         }
 
+        .input-pair {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .input-pair label {
+            color: var(--text-secondary);
+            font-size: 14px;
+            white-space: nowrap;
+        }
+
         input[type="number"] {
-            width: 80px;
+            width: 70px;
             padding: 8px;
             border: 1px solid var(--border-color);
             border-radius: 4px;
@@ -157,6 +169,7 @@
         .unit {
             color: var(--text-secondary);
             font-size: 14px;
+            white-space: nowrap;
         }
     </style>
 </head>
@@ -166,12 +179,16 @@
     <div class="input-group">
         <label>이모티콘 반복 횟수</label>
         <div class="input-row">
-            <label for="minRepetitions">최소:</label>
-            <input type="number" id="minRepetitions" min="1" value="1">
-            <span class="unit">회</span>
-            <label for="maxRepetitions">최대:</label>
-            <input type="number" id="maxRepetitions" min="1" value="1">
-            <span class="unit">회</span>
+            <div class="input-pair">
+                <label for="minRepetitions">최소</label>
+                <input type="number" id="minRepetitions" min="1" value="1">
+                <span class="unit">회</span>
+            </div>
+            <div class="input-pair">
+                <label for="maxRepetitions">최대</label>
+                <input type="number" id="maxRepetitions" min="1" value="1">
+                <span class="unit">회</span>
+            </div>
         </div>
         <small>같은 랜덤 이모티콘을 최소/최대 횟수 사이에서 랜덤하게 반복 클릭합니다.</small>
     </div>
@@ -179,12 +196,16 @@
     <div class="input-group">
         <label>자동 입력 간격</label>
         <div class="input-row">
-            <label for="minDelay">최소:</label>
-            <input type="number" id="minDelay" min="500" value="2000">
-            <span class="unit">ms</span>
-            <label for="maxDelay">최대:</label>
-            <input type="number" id="maxDelay" min="500" value="3000">
-            <span class="unit">ms</span>
+            <div class="input-pair">
+                <label for="minDelay">최소</label>
+                <input type="number" id="minDelay" min="500" value="2000">
+                <span class="unit">ms</span>
+            </div>
+            <div class="input-pair">
+                <label for="maxDelay">최대</label>
+                <input type="number" id="maxDelay" min="500" value="3000">
+                <span class="unit">ms</span>
+            </div>
         </div>
         <small>자동 입력 시 최소/최대 간격 사이에서 랜덤한 시간마다 입력합니다.</small>
     </div>
