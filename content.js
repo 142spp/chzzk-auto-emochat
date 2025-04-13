@@ -35,46 +35,61 @@ class EmoticonManager {
     }
 
     /**
-     * 사용 가능한 이모티콘 데이터를 가져옵니다.
-     * @returns {Array<{placeholder: string, imageUrl: string}>}
-     * @throws {Error} 이모티콘 데이터를 찾을 수 없는 경우
+     * 이모티콘 데이터를 가져옵니다.
+     * @param {boolean} [useCache=true] - 캐시 사용 여부
+     * @returns {Promise<Array<{name: string, url: string}>>}
      */
-    getAvailableEmoticonData() {
-        if (this.cachedData?.length > 0) {
-            console.log("캐시된 이모티콘 데이터 사용.");
-            return this.cachedData;
+    async getEmoticonData(useCache = true) {
+        try {
+            // 캐시된 데이터가 있고 캐시 사용이 허용된 경우
+            if (useCache && this.cachedData) {
+                return this.cachedData.map(item => ({
+                    name: item.placeholder.replace(/[{}:]/g, ""),
+                    url: item.imageUrl
+                }));
+            }
+
+            // 이모티콘 버튼 가져오기
+            const emoticonButtons = document.querySelectorAll(CONSTANTS.SELECTORS.EMOTICON_BUTTON);
+            if (emoticonButtons.length === 0) {
+                throw new Error("이모티콘 버튼을 찾을 수 없습니다. 이모티콘 팝업이 열려있는지 확인하세요.");
+            }
+
+            // 이모티콘 데이터 추출
+            const emoticons = Array.from(emoticonButtons)
+                .map(button => {
+                    const img = button.querySelector('img');
+                    if (!img) return null;
+
+                    const placeholder = img.getAttribute('alt');
+                    const imageUrl = img.getAttribute('src');
+
+                    if (!placeholder || !/^\{:.+:\}$/.test(placeholder) || !imageUrl) {
+                        return null;
+                    }
+
+                    return {
+                        name: placeholder.replace(/[{}:]/g, ""),
+                        url: imageUrl
+                    };
+                })
+                .filter(Boolean);
+
+            if (emoticons.length === 0) {
+                throw new Error("유효한 이모티콘 데이터를 찾을 수 없습니다.");
+            }
+
+            // 캐시 업데이트
+            this.cachedData = emoticons.map(item => ({
+                placeholder: `{:${item.name}:}`,
+                imageUrl: item.url
+            }));
+
+            return emoticons;
+        } catch (error) {
+            console.error('이모티콘 데이터 가져오기 중 오류:', error);
+            throw error;
         }
-
-        console.log("새 이모티콘 데이터 가져오는 중...");
-        const emoticonButtons = document.querySelectorAll(CONSTANTS.SELECTORS.EMOTICON_BUTTON);
-
-        if (emoticonButtons.length === 0) {
-            throw new Error("이모티콘 버튼을 찾을 수 없습니다. 이모티콘 팝업이 열려있는지 확인하세요.");
-        }
-
-        const data = Array.from(emoticonButtons)
-            .map(button => {
-                const img = button.querySelector('img');
-                if (!img) return null;
-
-                const placeholder = img.getAttribute('alt');
-                const imageUrl = img.getAttribute('src');
-
-                if (!placeholder || !/^\{:.+:\}$/.test(placeholder) || !imageUrl) {
-                    return null;
-                }
-
-                return { placeholder, imageUrl };
-            })
-            .filter(Boolean);
-
-        if (data.length === 0) {
-            throw new Error("유효한 이모티콘 데이터를 찾을 수 없습니다.");
-        }
-
-        this.cachedData = data;
-        console.log(`새 이모티콘 데이터 ${data.length}개 캐시됨.`);
-        return data;
     }
 
     /**
@@ -84,7 +99,7 @@ class EmoticonManager {
     async prepareEmoticonData() {
         try {
             const settings = await chrome.storage.sync.get(['minRepetitions', 'maxRepetitions']);
-            const availableEmoticons = this.getAvailableEmoticonData();
+            const availableEmoticons = await this.getEmoticonData();
 
             const minReps = Math.max(1, settings.minRepetitions || 1);
             const maxReps = Math.max(minReps, settings.maxRepetitions || 1);
@@ -92,8 +107,8 @@ class EmoticonManager {
 
             const randomIndex = Math.floor(Math.random() * availableEmoticons.length);
             const chosenEmoticon = availableEmoticons[randomIndex];
-            const { placeholder, imageUrl } = chosenEmoticon;
-            const emojiKey = placeholder.replace(/[{}:]/g, "");
+            const { name, url } = chosenEmoticon;
+            const placeholder = `{:${name}:}`;
 
             const chatInputContainer = document.querySelector(CONSTANTS.SELECTORS.INPUT_CONTAINER);
             const editableArea = chatInputContainer?.querySelector(CONSTANTS.SELECTORS.CHAT_INPUT);
@@ -105,13 +120,13 @@ class EmoticonManager {
             const currentChatVar = await MainWorldManager.getVariable(CONSTANTS.MAIN_WORLD_VARS.WORKING_CHAT) ?? "";
             const currentEmoticonMap = await MainWorldManager.getVariable(CONSTANTS.MAIN_WORLD_VARS.WORKING_EMOTICON) ?? {};
 
-            const emoticonHtml = `<img src="${imageUrl}" title="${placeholder}" alt="${placeholder}" style="vertical-align: middle; height: 20px; margin: 0 1px;">`;
+            const emoticonHtml = `<img src="${url}" title="${placeholder}" alt="${placeholder}" style="vertical-align: middle; height: 20px; margin: 0 1px;">`;
             const newHtmlString = currentChatVar + emoticonHtml.repeat(actualRepetitions);
             const newWorkingChat = currentChatVar + placeholder.repeat(actualRepetitions);
             const newEmoticonMap = { ...currentEmoticonMap };
 
-            if (!newEmoticonMap[emojiKey]) {
-                newEmoticonMap[emojiKey] = imageUrl;
+            if (!newEmoticonMap[name]) {
+                newEmoticonMap[name] = url;
             }
 
             return {
@@ -299,6 +314,11 @@ class MessageHandler {
                 case "injectAndSendTrigger":
                     const success = await this.emoticonManager.sendEmoticon(message.isAuto);
                     sendResponse({ success });
+                    break;
+
+                case "getEmoticons":
+                    const emoticons = await this.emoticonManager.getEmoticonData();
+                    sendResponse({ emoticons });
                     break;
 
                 default:
