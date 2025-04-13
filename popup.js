@@ -1,197 +1,344 @@
 // --- 상수 정의 ---
 const CONSTANTS = {
-    SELECTORS: {
-        MIN_REPETITIONS: 'minRepetitions',
-        MAX_REPETITIONS: 'maxRepetitions',
-        MIN_DELAY: 'minDelay',
-        MAX_DELAY: 'maxDelay',
-        SAVE_BUTTON: 'save',
-        STATUS_DIV: 'status',
-        SHORTCUT_DISPLAY_MANUAL: 'shortcutDisplayManual',
-        SHORTCUT_DISPLAY_AUTO: 'shortcutDisplayAuto'
+    STORAGE_KEYS: {
+        SETTINGS: 'settings',
+        SHORTCUTS: 'shortcuts',
+        EMOTICON_CACHE: 'emoticonCache',
+        SELECTED_EMOTICONS: 'selectedEmoticons'
     },
-    LIMITS: {
-        MIN_REPETITIONS: 1,
-        MAX_REPETITIONS: 100,
-        MIN_DELAY: 500
+    DEFAULT_SETTINGS: {
+        minRepetitions: 4,
+        maxRepetitions: 8,
+        minDelay: 2000,
+        maxDelay: 3000
     },
-    DEFAULTS: {
-        MIN_REPETITIONS: 1,
-        MAX_REPETITIONS: 1,
-        MIN_DELAY: 2000,
-        MAX_DELAY: 3000
-    },
-    SHORTCUTS: {
-        MANUAL: 'Ctrl+Shift+E (기본값)',
-        AUTO: 'Ctrl+Shift+R (기본값)'
+    DEFAULT_SHORTCUTS: {
+        manual: 'Alt+Q',
+        auto: 'Alt+W'
     }
 };
 
-// --- UI 관리 클래스 ---
-class UIManager {
+// --- 이모티콘 관리 클래스 ---
+class EmoticonManager {
     constructor() {
-        this.elements = {};
-        this.initializeElements();
+        this.selectedEmoticons = new Set();
+        this.emoticonList = document.getElementById('emoticonList');
+        this.selectAllBtn = document.getElementById('selectAllBtn');
+        this.deselectAllBtn = document.getElementById('deselectAllBtn');
     }
 
-    initializeElements() {
-        Object.entries(CONSTANTS.SELECTORS).forEach(([key, id]) => {
-            this.elements[key] = document.getElementById(id);
+    /**
+     * 이모티콘 목록을 초기화합니다.
+     */
+    async initialize() {
+        // 이벤트 리스너 등록
+        this.selectAllBtn.addEventListener('click', () => this.selectAllEmoticons());
+        this.deselectAllBtn.addEventListener('click', () => this.deselectAllEmoticons());
+
+        // 이모티콘 목록 가져오기
+        await this.loadEmoticonList();
+    }
+
+    /**
+     * 이모티콘 목록을 로드합니다.
+     */
+    async loadEmoticonList() {
+        try {
+            const result = await chrome.storage.local.get([CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE]);
+            const emoticons = result[CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE] || [];
+            
+            // 이모티콘 목록 비우기
+            this.emoticonList.innerHTML = '';
+            
+            // 각 이모티콘에 대한 UI 요소 생성
+            emoticons.forEach((emoticon, index) => {
+                const item = document.createElement('div');
+                item.className = 'emoticon-item';
+                item.dataset.index = index;
+                
+                const img = document.createElement('img');
+                img.src = emoticon.url;
+                img.alt = emoticon.name;
+                
+                item.appendChild(img);
+                item.addEventListener('click', () => this.toggleEmoticonSelection(index));
+                
+                this.emoticonList.appendChild(item);
+            });
+
+            // 선택 상태 복원
+            await this.restoreSelectionState();
+        } catch (error) {
+            console.error('이모티콘 목록 로드 중 오류:', error);
+        }
+    }
+
+    /**
+     * 이모티콘 선택 상태를 토글합니다.
+     * @param {number} index - 이모티콘 인덱스
+     */
+    toggleEmoticonSelection(index) {
+        if (this.selectedEmoticons.has(index)) {
+            this.selectedEmoticons.delete(index);
+        } else {
+            this.selectedEmoticons.add(index);
+        }
+        this.updateSelectionUI();
+        this.saveSelectionState();
+    }
+
+    /**
+     * 선택 상태 UI를 업데이트합니다.
+     */
+    updateSelectionUI() {
+        const items = document.querySelectorAll('.emoticon-item');
+        items.forEach((item, index) => {
+            if (this.selectedEmoticons.has(index)) {
+                item.classList.add('selected');
+            } else {
+                item.classList.remove('selected');
+            }
         });
     }
 
-    showStatus(message, type = 'success') {
-        const { STATUS_DIV } = this.elements;
-        STATUS_DIV.textContent = message;
-        STATUS_DIV.className = type;
-        
-        setTimeout(() => {
-            STATUS_DIV.className = '';
-            STATUS_DIV.textContent = '';
-        }, 3000);
+    /**
+     * 선택 상태를 복원합니다.
+     */
+    async restoreSelectionState() {
+        try {
+            const result = await chrome.storage.local.get([CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS]);
+            if (result[CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS]) {
+                this.selectedEmoticons = new Set(result[CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS]);
+                this.updateSelectionUI();
+            } else {
+                // 기본적으로 모든 이모티콘 선택
+                this.selectAllEmoticons();
+            }
+        } catch (error) {
+            console.error('선택 상태 복원 중 오류:', error);
+        }
     }
 
-    updateShortcutDisplay(manualShortcut, autoShortcut) {
-        const { SHORTCUT_DISPLAY_MANUAL, SHORTCUT_DISPLAY_AUTO } = this.elements;
-        SHORTCUT_DISPLAY_MANUAL.textContent = manualShortcut || CONSTANTS.SHORTCUTS.MANUAL;
-        SHORTCUT_DISPLAY_AUTO.textContent = autoShortcut || CONSTANTS.SHORTCUTS.AUTO;
+    /**
+     * 선택 상태를 저장합니다.
+     */
+    async saveSelectionState() {
+        try {
+            await chrome.storage.local.set({
+                [CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS]: Array.from(this.selectedEmoticons)
+            });
+        } catch (error) {
+            console.error('선택 상태 저장 중 오류:', error);
+        }
     }
 
-    getInputValues() {
-        const { MIN_REPETITIONS, MAX_REPETITIONS, MIN_DELAY, MAX_DELAY } = this.elements;
-        return {
-            minRepetitions: parseInt(MIN_REPETITIONS.value, 10),
-            maxRepetitions: parseInt(MAX_REPETITIONS.value, 10),
-            minDelay: parseInt(MIN_DELAY.value, 10),
-            maxDelay: parseInt(MAX_DELAY.value, 10)
-        };
+    /**
+     * 모든 이모티콘을 선택합니다.
+     */
+    selectAllEmoticons() {
+        const items = document.querySelectorAll('.emoticon-item');
+        this.selectedEmoticons = new Set(Array.from({length: items.length}, (_, i) => i));
+        this.updateSelectionUI();
+        this.saveSelectionState();
     }
 
-    setInputValues(values) {
-        const { MIN_REPETITIONS, MAX_REPETITIONS, MIN_DELAY, MAX_DELAY } = this.elements;
-        MIN_REPETITIONS.value = values.minRepetitions || CONSTANTS.DEFAULTS.MIN_REPETITIONS;
-        MAX_REPETITIONS.value = values.maxRepetitions || CONSTANTS.DEFAULTS.MAX_REPETITIONS;
-        MIN_DELAY.value = values.minDelay || CONSTANTS.DEFAULTS.MIN_DELAY;
-        MAX_DELAY.value = values.maxDelay || CONSTANTS.DEFAULTS.MAX_DELAY;
+    /**
+     * 모든 이모티콘 선택을 해제합니다.
+     */
+    deselectAllEmoticons() {
+        this.selectedEmoticons.clear();
+        this.updateSelectionUI();
+        this.saveSelectionState();
+    }
+
+    /**
+     * 선택된 이모티콘 목록을 가져옵니다.
+     * @returns {Promise<Array<{name: string, url: string}>>}
+     */
+    async getSelectedEmoticons() {
+        try {
+            const result = await chrome.storage.local.get([
+                CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE,
+                CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS
+            ]);
+            
+            const emoticons = result[CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE] || [];
+            const selectedIndices = result[CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS] || [];
+            
+            return emoticons.filter((_, index) => selectedIndices.includes(index));
+        } catch (error) {
+            console.error('선택된 이모티콘 가져오기 중 오류:', error);
+            return [];
+        }
     }
 }
 
 // --- 설정 관리 클래스 ---
 class SettingsManager {
-    constructor(uiManager) {
-        this.uiManager = uiManager;
+    constructor() {
+        this.settings = { ...CONSTANTS.DEFAULT_SETTINGS };
+        this.shortcuts = { ...CONSTANTS.DEFAULT_SHORTCUTS };
     }
 
+    /**
+     * 설정을 로드합니다.
+     */
     async loadSettings() {
         try {
-            const settings = await chrome.storage.sync.get([
-                'minRepetitions',
-                'maxRepetitions',
-                'minDelay',
-                'maxDelay'
+            const result = await chrome.storage.sync.get([
+                CONSTANTS.STORAGE_KEYS.SETTINGS,
+                CONSTANTS.STORAGE_KEYS.SHORTCUTS
             ]);
-            this.uiManager.setInputValues(settings);
-
-            const commands = await chrome.commands.getAll();
-            const manualCommand = commands.find(cmd => cmd.name === 'trigger-emoticon');
-            const autoCommand = commands.find(cmd => cmd.name === 'toggle-auto-send');
             
-            this.uiManager.updateShortcutDisplay(
-                manualCommand?.shortcut,
-                autoCommand?.shortcut
-            );
+            this.settings = { ...this.settings, ...result[CONSTANTS.STORAGE_KEYS.SETTINGS] };
+            this.shortcuts = { ...this.shortcuts, ...result[CONSTANTS.STORAGE_KEYS.SHORTCUTS] };
+            
+            this.updateUI();
         } catch (error) {
-            console.error('설정 로드 중 오류 발생:', error);
-            this.uiManager.showStatus('설정 로드 실패', 'error');
+            console.error('설정 로드 중 오류:', error);
+            UIManager.showStatus('설정 로드 중 오류가 발생했습니다.', 'error');
         }
     }
 
-    validateSettings(values) {
-        const { MIN_REPETITIONS, MAX_REPETITIONS, MIN_DELAY } = CONSTANTS.LIMITS;
+    /**
+     * 설정값의 유효성을 검사합니다.
+     * @returns {{isValid: boolean, errorMessage: string}} 유효성 검사 결과
+     */
+    validateSettings() {
+        const { minRepetitions, maxRepetitions, minDelay, maxDelay } = this.settings;
 
-        // 반복 횟수 유효성 검사
-        if (isNaN(values.minRepetitions) || isNaN(values.maxRepetitions) || 
-            values.minRepetitions < MIN_REPETITIONS || values.maxRepetitions < MIN_REPETITIONS) {
-            this.uiManager.showStatus('반복 횟수는 1 이상이어야 합니다.', 'error');
-            return false;
-        }
-        if (values.minRepetitions > MAX_REPETITIONS || values.maxRepetitions > MAX_REPETITIONS) {
-            this.uiManager.showStatus('반복 횟수는 100 이하여야 합니다.', 'error');
-            return false;
-        }
-        if (values.minRepetitions > values.maxRepetitions) {
-            this.uiManager.showStatus('최대 반복 횟수는 최소 반복 횟수보다 크거나 같아야 합니다.', 'error');
-            return false;
-        }
+        // 반복 횟수 검사
+        if (minRepetitions < 1 || maxRepetitions < 1) 
+            return { isValid: false, errorMessage: '반복 횟수는 1 이상이어야 합니다.' };
+        if (minRepetitions > 100 || maxRepetitions > 100)
+            return { isValid: false, errorMessage: '반복 횟수는 100 이하여야 합니다.' };
+        // 딜레이 검사
+        if (minDelay < 500 || maxDelay < 500) 
+            return { isValid: false, errorMessage: '자동 입력 간격은 500ms 이상이어야 합니다.' };
+        if (minDelay > 9999 || maxDelay > 9999)
+            return { isValid: false, errorMessage: '자동 입력 간격은 9999ms 이하여야 합니다.' };
+        // 최소값이 최대값보다 큰 경우 검사
+        if (minRepetitions > maxRepetitions) 
+            return { isValid: false, errorMessage: '최소값이 최대값보다 클 수 없습니다.' };
+        if (minDelay > maxDelay)
+            return { isValid: false, errorMessage: '최소값이 최대값보다 클 수 없습니다.' };
 
-        // 딜레이 유효성 검사
-        if (isNaN(values.minDelay) || isNaN(values.maxDelay)) {
-            this.uiManager.showStatus('자동 입력 간격은 숫자여야 합니다.', 'error');
-            return false;
-        }
-        if (values.minDelay < MIN_DELAY || values.maxDelay < MIN_DELAY) {
-            this.uiManager.showStatus('자동 입력 간격은 500ms 이상이어야 합니다.', 'error');
-            return false;
-        }
-        if (values.minDelay > values.maxDelay) {
-            this.uiManager.showStatus('최대 간격은 최소 간격보다 크거나 같아야 합니다.', 'error');
-            return false;
-        }
-
-        return true;
+        return { isValid: true, errorMessage: '' };
     }
 
+    /**
+     * 설정을 저장합니다.
+     * @returns {{success: boolean, errorMessage: string}} 저장 결과
+     */
     async saveSettings() {
         try {
-            const values = this.uiManager.getInputValues();
-            
-            if (!this.validateSettings(values)) {
-                return;
+            // 설정값 유효성 검사
+            const validation = this.validateSettings();
+            if (!validation.isValid) {
+                return { success: false, errorMessage: validation.errorMessage };
             }
 
-            await chrome.storage.sync.set(values);
-            this.uiManager.showStatus('설정이 저장되었습니다!', 'success');
-            
-            await chrome.runtime.sendMessage({ action: "settingsUpdated" })
-                .catch(e => console.log("Background 메시지 전송 실패:", e));
+            await chrome.storage.sync.set({
+                [CONSTANTS.STORAGE_KEYS.SETTINGS]: this.settings,
+                [CONSTANTS.STORAGE_KEYS.SHORTCUTS]: this.shortcuts
+            });
+            return { success: true, errorMessage: '' };
         } catch (error) {
-            console.error('설정 저장 중 오류 발생:', error);
-            this.uiManager.showStatus('설정 저장 실패', 'error');
+            console.error('설정 저장 중 오류:', error);
+            let errorMessage = '알 수 없는 오류가 발생했습니다.';
+            
+            if (error.message.includes('QuotaExceededError')) {
+                errorMessage = '저장 공간이 부족합니다.';
+            } else if (error.message.includes('NetworkError')) {
+                errorMessage = '네트워크 연결을 확인해주세요.';
+            }
+            
+            return { success: false, errorMessage };
         }
+    }
+
+    /**
+     * UI를 업데이트합니다.
+     */
+    updateUI() {
+        // 설정값 업데이트
+        document.getElementById('minRepetitions').value = this.settings.minRepetitions;
+        document.getElementById('maxRepetitions').value = this.settings.maxRepetitions;
+        document.getElementById('minDelay').value = this.settings.minDelay;
+        document.getElementById('maxDelay').value = this.settings.maxDelay;
+        
+        // 단축키 업데이트
+        document.getElementById('shortcutDisplayManual').textContent = this.shortcuts.manual;
+        document.getElementById('shortcutDisplayAuto').textContent = this.shortcuts.auto;
+    }
+
+    /**
+     * UI에서 설정을 가져옵니다.
+     */
+    getSettingsFromUI() {
+        this.settings.minRepetitions = parseInt(document.getElementById('minRepetitions').value) || 1;
+        this.settings.maxRepetitions = parseInt(document.getElementById('maxRepetitions').value) || 1;
+        this.settings.minDelay = parseInt(document.getElementById('minDelay').value) || 3000;
+        this.settings.maxDelay = parseInt(document.getElementById('maxDelay').value) || 6000;
+    }
+}
+
+// --- UI 관리 클래스 ---
+class UIManager {
+    /**
+     * 상태 메시지를 표시합니다.
+     * @param {string} message - 메시지 내용
+     * @param {string} [type='info'] - 메시지 타입 (info, success, error)
+     */
+    static showStatus(message, type = 'info') {
+        const statusElement = document.getElementById('status');
+        statusElement.textContent = message;
+        statusElement.className = `status ${type}`;
+        
+        setTimeout(() => {
+            statusElement.textContent = '';
+            statusElement.className = 'status';
+        }, 3000);
     }
 }
 
 // --- 이벤트 핸들러 클래스 ---
 class EventHandler {
-    constructor(settingsManager) {
+    constructor(settingsManager, emoticonManager) {
         this.settingsManager = settingsManager;
+        this.emoticonManager = emoticonManager;
     }
 
+    /**
+     * 이벤트 리스너를 초기화합니다.
+     */
     initializeEventListeners() {
-        const { SAVE_BUTTON } = CONSTANTS.SELECTORS;
-        const saveButton = document.getElementById(SAVE_BUTTON);
-        const shortcutLink = document.querySelector('a[href="chrome://extensions/shortcuts"]');
-
-        document.addEventListener('DOMContentLoaded', () => {
-            this.settingsManager.loadSettings();
+        // 저장 버튼 이벤트
+        document.getElementById('save').addEventListener('click', async () => {
+            this.settingsManager.getSettingsFromUI();
+            const result = await this.settingsManager.saveSettings();
+            
+            if (result.success) {
+                UIManager.showStatus('설정이 저장되었습니다.', 'success');
+            } else {
+                UIManager.showStatus(result.errorMessage, 'error');
+            }
         });
 
-        saveButton.addEventListener('click', () => {
-            this.settingsManager.saveSettings();
+        // 단축키 설정 버튼 이벤트
+        document.getElementById('shortcutButton').addEventListener('click', () => {
+            chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
         });
-
-        if (shortcutLink) {
-            shortcutLink.addEventListener('click', (e) => {
-                e.preventDefault();
-                chrome.tabs.create({ url: e.target.href });
-            });
-        }
     }
 }
 
 // --- 초기화 ---
-const uiManager = new UIManager();
-const settingsManager = new SettingsManager(uiManager);
-const eventHandler = new EventHandler(settingsManager);
-
-eventHandler.initializeEventListeners();
+document.addEventListener('DOMContentLoaded', async () => {
+    const settingsManager = new SettingsManager();
+    const emoticonManager = new EmoticonManager();
+    const eventHandler = new EventHandler(settingsManager, emoticonManager);
+    
+    await settingsManager.loadSettings();
+    await emoticonManager.initialize();
+    eventHandler.initializeEventListeners();
+});
