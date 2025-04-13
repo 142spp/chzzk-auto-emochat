@@ -84,7 +84,11 @@ function saveSettings() {
 document.addEventListener('DOMContentLoaded', loadSettings);
 saveButton.addEventListener('click', saveSettings);
 
-// 단축키 설정 페이지 열기
-document.getElementById('shortcutButton').addEventListener('click', () => {
-    chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
-}); 
+// 단축키 링크 처리
+const shortcutLink = document.querySelector('a[href="chrome://extensions/shortcuts"]');
+if (shortcutLink) {
+    shortcutLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        chrome.tabs.create({ url: e.target.href });
+    });
+}

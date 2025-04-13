@@ -13,7 +13,7 @@
     "*://*.chzzk.naver.com/*"
   ],
   "action": {
-    "default_popup": "src/popup.html",
+    "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
@@ -41,14 +41,14 @@
         "default": "Alt+Q",
         "mac": "Command+Shift+E"
       },
-      "description": "이모티콘 전송"
+      "description": "수동 입력"
     },
     "toggle-auto-send": {
       "suggested_key": {
         "default": "Alt+W",
         "mac": "Command+Shift+R"
       },
-      "description": "자동 전송 토글"
+      "description": "자동 토글"
     }
   }
 }
