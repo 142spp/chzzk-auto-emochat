@@ -15,143 +15,249 @@ const CONSTANTS = {
     BADGE_TEXTS: {
         ACTIVE: 'ON',
         INACTIVE: ''
-    }
+    },
+    CHZZK_URL_PATTERN: "*://*.chzzk.naver.com/*"
 };
 
-// --- 상태 관리 ---
-let state = {
-    lastExecutionTime: 0,
-    isAutoSending: false,
-    autoSendTimeoutId: null,
-    isExecuting: false
-};
-
-// --- Helper Functions ---
-
-/**
- * 아이콘 배지를 업데이트합니다.
- */
-function updateIconBadge() {
-    const { isAutoSending } = state;
-    let badgeText = CONSTANTS.BADGE_TEXTS.INACTIVE;
-    let color = CONSTANTS.BADGE_COLORS.DEFAULT;
-
-    if (isAutoSending) {
-        badgeText = CONSTANTS.BADGE_TEXTS.ACTIVE;
-        color = CONSTANTS.BADGE_COLORS.ACTIVE;
+// --- 상태 관리 클래스 ---
+class StateManager {
+    constructor() {
+        this.state = {
+            lastExecutionTime: 0,
+            isAutoSending: false,
+            autoSendTimeoutId: null,
+            isExecuting: false
+        };
     }
 
-    chrome.action.setBadgeText({ text: badgeText });
-    chrome.action.setBadgeBackgroundColor({ color });
+    get isAutoSending() {
+        return this.state.isAutoSending;
+    }
+
+    set isAutoSending(value) {
+        this.state.isAutoSending = value;
+        this.updateIconBadge();
+    }
+
+    get isExecuting() {
+        return this.state.isExecuting;
+    }
+
+    set isExecuting(value) {
+        this.state.isExecuting = value;
+    }
+
+    clearAutoSendTimeout() {
+        if (this.state.autoSendTimeoutId) {
+            clearTimeout(this.state.autoSendTimeoutId);
+            this.state.autoSendTimeoutId = null;
+        }
+    }
+
+    updateIconBadge() {
+        const badgeText = this.state.isAutoSending ? CONSTANTS.BADGE_TEXTS.ACTIVE : CONSTANTS.BADGE_TEXTS.INACTIVE;
+        const color = this.state.isAutoSending ? CONSTANTS.BADGE_COLORS.ACTIVE : CONSTANTS.BADGE_COLORS.DEFAULT;
+
+        chrome.action.setBadgeText({ text: badgeText });
+        chrome.action.setBadgeBackgroundColor({ color });
+    }
 }
 
-/**
- * 활성 탭에 토스트 메시지를 표시합니다.
- * @param {string} message - 표시할 메시지
- */
-async function showToastInActiveTab(message) {
-    try {
+// --- 유틸리티 클래스 ---
+class TabUtils {
+    static async getActiveChzzkTab() {
         const tabs = await chrome.tabs.query({ 
             active: true, 
             currentWindow: true, 
-            url: "*://*.chzzk.naver.com/*" 
+            url: CONSTANTS.CHZZK_URL_PATTERN 
         });
         
-        if (tabs.length > 0) {
-            await chrome.tabs.sendMessage(tabs[0].id, { 
+        if (tabs.length === 0) {
+            throw new Error("활성 치지직 탭이 없습니다.");
+        }
+        
+        return tabs[0];
+    }
+
+    static async showToastInActiveTab(message) {
+        try {
+            const tab = await this.getActiveChzzkTab();
+            await chrome.tabs.sendMessage(tab.id, { 
                 action: "showToast", 
                 message 
             });
+        } catch (error) {
+            console.error("토스트 메시지 전송 실패:", error);
         }
-    } catch (error) {
-        console.error("토스트 메시지 전송 실패:", error);
+    }
+
+    static async sendEmoticonTriggerToActiveTab(isAuto = true) {
+        try {
+            const tab = await this.getActiveChzzkTab();
+            const response = await chrome.tabs.sendMessage(tab.id, { 
+                action: "injectAndSendTrigger", 
+                isAuto 
+            });
+            
+            if (!response?.success) {
+                throw new Error("Content script failed");
+            }
+            
+            return true;
+        } catch (error) {
+            console.error("이모티콘 트리거 전송 실패:", error);
+            throw error;
+        }
     }
 }
 
-/**
- * 활성 탭에 이모티콘 트리거를 전송합니다.
- * @param {boolean} isAuto - 자동 전송 여부
- * @returns {Promise<boolean>} 전송 성공 여부
- */
-async function sendEmoticonTriggerToActiveTab(isAuto = true) {
-    if (state.isExecuting) {
-        console.log("이미 이모티콘 전송이 실행 중입니다.");
-        throw new Error("이미 실행 중");
+// --- 메시지 핸들러 클래스 ---
+class MessageHandler {
+    constructor(stateManager) {
+        this.stateManager = stateManager;
     }
 
-    try {
-        state.isExecuting = true;
-        const tabs = await chrome.tabs.query({ 
-            active: true, 
-            currentWindow: true, 
-            url: "*://*.chzzk.naver.com/*" 
-        });
+    async handleMessage(message, sender, sendResponse) {
+        console.log(`Background 메시지 수신: ${message.action || message.type}`);
 
-        if (tabs.length === 0) {
-            throw new Error("활성 치지직 탭 없음");
+        try {
+            switch (message.action || message.type) {
+                case "getAutoSendStatus":
+                    return { isAutoSending: this.stateManager.isAutoSending };
+                
+                case "settingsUpdated":
+                    console.log("설정 변경 감지됨.");
+                    return { success: true };
+
+                case "getVariable":
+                    return await this.handleGetVariable(message, sender);
+                
+                case "setVariable":
+                    return await this.handleSetVariable(message, sender);
+                
+                case "callWindowFunction":
+                    return await this.handleCallWindowFunction(message, sender);
+                
+                default:
+                    console.warn("알 수 없는 메시지 타입:", message.action || message.type);
+                    return { success: false, error: "알 수 없는 메시지 타입" };
+            }
+        } catch (error) {
+            console.error("메시지 처리 중 오류 발생:", error);
+            return { success: false, error: error.message };
         }
+    }
 
-        const tabId = tabs[0].id;
-        console.log(`탭 (${tabId})에 이모티콘 트리거 전송 (${isAuto ? '자동' : '수동'})`);
-
-        const response = await chrome.tabs.sendMessage(tabId, { 
-            action: "injectAndSendTrigger", 
-            isAuto 
+    async handleGetVariable(message, sender) {
+        if (!sender?.tab?.id) throw new Error("Sender Tab ID 없음");
+        
+        const [{ result }] = await chrome.scripting.executeScript({
+            target: { tabId: sender.tab.id },
+            func: (variableName) => window[variableName],
+            args: [message.value],
+            world: "MAIN"
         });
+        
+        console.log(`getVariable (${message.value}):`, result);
+        return result;
+    }
 
-        if (!response?.success) {
-            throw new Error("Content script failed");
-        }
+    async handleSetVariable(message, sender) {
+        if (!sender?.tab?.id) throw new Error("Sender Tab ID 없음");
+        
+        await chrome.scripting.executeScript({
+            target: { tabId: sender.tab.id },
+            func: (name, value) => { window[name] = value; },
+            args: [message.value.name, message.value.value],
+            world: "MAIN"
+        });
+        
+        console.log(`setVariable (${message.value.name}) 완료`);
+        return { success: true };
+    }
 
-        return true;
-    } catch (error) {
-        console.error("이모티콘 트리거 전송 실패:", error);
-        throw error;
-    } finally {
-        state.isExecuting = false;
+    async handleCallWindowFunction(message, sender) {
+        if (!sender?.tab?.id) throw new Error("Sender Tab ID 없음");
+        
+        const funcName = message.value.functionName;
+        const args = message.value.args || [];
+        
+        const [{ result }] = await chrome.scripting.executeScript({
+            target: { tabId: sender.tab.id },
+            func: (funcName, args) => {
+                const func = window[funcName];
+                if (typeof func !== 'function') {
+                    throw new Error(`함수를 찾을 수 없음: ${funcName}`);
+                }
+                return func.apply(window, args);
+            },
+            args: [funcName, args],
+            world: "MAIN"
+        });
+        
+        return result;
     }
 }
 
-/**
- * 다음 자동 실행을 예약합니다.
- */
-function scheduleNextAutoSend() {
-    const { isAutoSending, autoSendTimeoutId } = state;
-
-    if (!isAutoSending) {
-        console.log("다음 자동 실행 예약 중지됨 (비활성).");
-        if (autoSendTimeoutId) {
-            clearTimeout(autoSendTimeoutId);
-            state.autoSendTimeoutId = null;
-        }
-        return;
+// --- 자동 전송 관리 클래스 ---
+class AutoSendManager {
+    constructor(stateManager) {
+        this.stateManager = stateManager;
     }
 
-    chrome.storage.sync.get(['minDelay', 'maxDelay'], (settings) => {
-        let minDelay = Math.max(CONSTANTS.MIN_DELAY, settings.minDelay || CONSTANTS.DEFAULT_SETTINGS.minDelay);
-        let maxDelay = Math.max(minDelay, settings.maxDelay || CONSTANTS.DEFAULT_SETTINGS.maxDelay);
+    async startAutoSend() {
+        if (this.stateManager.isAutoSending) return;
 
+        this.stateManager.isAutoSending = true;
+        console.log("자동 이모티콘 입력 시작 요청됨.");
+        await TabUtils.showToastInActiveTab("자동 입력 시작됨");
+        this.scheduleNextAutoSend();
+    }
+
+    stopAutoSend(reason = "사용자 요청") {
+        if (!this.stateManager.isAutoSending) return;
+
+        this.stateManager.clearAutoSendTimeout();
+        this.stateManager.isAutoSending = false;
+        console.log(`자동 이모티콘 입력 중지 (${reason})`);
+        TabUtils.showToastInActiveTab("자동 입력 중지됨");
+    }
+
+    async scheduleNextAutoSend() {
+        if (!this.stateManager.isAutoSending) {
+            console.log("다음 자동 실행 예약 중지됨 (비활성).");
+            return;
+        }
+
+        const settings = await chrome.storage.sync.get(['minDelay', 'maxDelay']);
+        const minDelay = Math.max(CONSTANTS.MIN_DELAY, settings.minDelay || CONSTANTS.DEFAULT_SETTINGS.minDelay);
+        const maxDelay = Math.max(minDelay, settings.maxDelay || CONSTANTS.DEFAULT_SETTINGS.maxDelay);
         const randomDelay = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
+
         console.log(`다음 자동 실행 ${randomDelay}ms 후에 예약됨`);
 
-        state.autoSendTimeoutId = setTimeout(async () => {
-            if (!state.isAutoSending) {
+        this.stateManager.state.autoSendTimeoutId = setTimeout(async () => {
+            if (!this.stateManager.isAutoSending) {
                 console.log("Timeout 실행 시점: 자동 실행 비활성됨.");
                 return;
             }
 
             try {
-                await sendEmoticonTriggerToActiveTab();
-                scheduleNextAutoSend();
+                await TabUtils.sendEmoticonTriggerToActiveTab(true);
+                this.scheduleNextAutoSend();
             } catch (error) {
                 console.error("자동 입력 중 오류 발생, 자동 입력 중지:", error.message);
-                stopAutoSend(`오류 발생 (${error.message})`);
+                this.stopAutoSend(`오류 발생 (${error.message})`);
             }
         }, randomDelay);
-    });
+    }
 }
 
-// --- 이벤트 리스너 ---
+// --- 초기화 및 이벤트 리스너 ---
+const stateManager = new StateManager();
+const messageHandler = new MessageHandler(stateManager);
+const autoSendManager = new AutoSendManager(stateManager);
+
 chrome.runtime.onInstalled.addListener(() => {
     chrome.storage.sync.get(Object.keys(CONSTANTS.DEFAULT_SETTINGS), (result) => {
         const updates = {};
@@ -166,128 +272,23 @@ chrome.runtime.onInstalled.addListener(() => {
         }
     });
     console.log('이모티콘 도우미 설치/업데이트됨. 기본 설정 확인.');
-    updateIconBadge();
+    stateManager.updateIconBadge();
 });
 
 chrome.runtime.onStartup.addListener(() => {
-    state = {
-        ...state,
+    stateManager.state = {
+        ...stateManager.state,
         isAutoSending: false,
         autoSendTimeoutId: null
     };
-    updateIconBadge();
+    stateManager.updateIconBadge();
 });
 
-function startAutoSend() {
-    if (state.isAutoSending) return;
-
-    state.isAutoSending = true;
-    console.log(`자동 이모티콘 입력 시작 요청됨.`);
-    updateIconBadge();
-    showToastInActiveTab("자동 입력 시작됨");
-    scheduleNextAutoSend();
-}
-
-function stopAutoSend(reason = "사용자 요청") {
-    if (!state.isAutoSending) return;
-
-    if (state.autoSendTimeoutId) {
-        clearTimeout(state.autoSendTimeoutId);
-        state.autoSendTimeoutId = null;
-    }
-    state.isAutoSending = false;
-    console.log(`자동 이모티콘 입력 중지 (${reason})`);
-    updateIconBadge();
-    showToastInActiveTab("자동 입력 중지됨");
-}
-
-// --- 메시지 핸들러 ---
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    console.log(`Background 메시지 수신: ${message.action || message.type}`);
-
-    // 비동기 처리를 위한 IIFE
-    (async () => {
-        try {
-            switch (message.action || message.type) {
-                case "getAutoSendStatus":
-                    sendResponse({
-                        isAutoSending: state.isAutoSending
-                    });
-                    break;
-                case "settingsUpdated":
-                    console.log("설정 변경 감지됨.");
-                    sendResponse({ success: true });
-                    break;
-
-                // --- Content Script가 Main World와 상호작용하기 위한 핸들러 ---
-                case "getVariable": {
-                    if (!sender?.tab?.id) throw new Error("Sender Tab ID 없음");
-                    const [{ result }] = await chrome.scripting.executeScript({
-                        target: { tabId: sender.tab.id },
-                        func: (variableName) => window[variableName],
-                        args: [message.value],
-                        world: "MAIN"
-                    }).catch(e => { console.error("getVariable 실패:", e); throw e; });
-                    console.log(`getVariable (${message.value}):`, result);
-                    sendResponse(result);
-                    break;
-                }
-                case "setVariable": {
-                    if (!sender?.tab?.id) throw new Error("Sender Tab ID 없음");
-                    await chrome.scripting.executeScript({
-                        target: { tabId: sender.tab.id },
-                        func: (name, value) => { window[name] = value; },
-                        args: [message.value.name, message.value.value],
-                        world: "MAIN"
-                    }).catch(e => { console.error("setVariable 실패:", e); throw e; });
-                    console.log(`setVariable (${message.value.name}) 완료`);
-                    sendResponse({ success: true });
-                    break;
-                }
-                case "callWindowFunction": {
-                    if (!sender?.tab?.id) throw new Error("Sender Tab ID 없음");
-                    const funcName = message.value.functionName;
-                    const args = message.value.args || [];
-                    console.log(`callWindowFunction (${funcName}) 호출 시도, Args:`, args);
-                    const [{ result }] = await chrome.scripting.executeScript({
-                        target: { tabId: sender.tab.id },
-                        func: (name, funcArgs) => {
-                            if (typeof window[name] === 'function') {
-                                try {
-                                    return window[name](...funcArgs);
-                                } catch (e) {
-                                    console.error(`Error executing window.${name}:`, e);
-                                    return { error: e.message };
-                                }
-                            } else {
-                                console.warn(`window.${name} is not a function.`);
-                                return { error: `${name} is not a function` };
-                            }
-                        },
-                        args: [funcName, args],
-                        world: "MAIN"
-                    }).catch(e => { console.error(`callWindowFunction (${funcName}) 실패:`, e); throw e; });
-                    console.log(`callWindowFunction (${funcName}) 결과:`, result);
-                    sendResponse(result);
-                    break;
-                }
-
-                default:
-                    console.log("알 수 없는 메시지:", message);
-                    sendResponse({ success: false, error: "Unknown action" });
-                    break;
-            }
-        } catch (error) {
-            console.error(`메시지 처리 중 오류 (${message.action || message.type}):`, error);
-            try {
-                sendResponse({ success: false, error: error.message });
-            } catch (responseError) {
-                console.error("오류 응답 전송 실패:", responseError);
-            }
-        }
-    })();
-
-    return true;
+    messageHandler.handleMessage(message, sender, sendResponse)
+        .then(sendResponse)
+        .catch(error => sendResponse({ success: false, error: error.message }));
+    return true; // 비동기 응답을 위해 true 반환
 });
 
 // 단축키 핸들러
@@ -296,27 +297,32 @@ chrome.commands.onCommand.addListener((command) => {
         console.log("수동 이모티콘 전송 단축키 감지:", command);
         const currentTime = Date.now();
 
-        if (state.isExecuting) {
+        if (stateManager.isExecuting) {
             console.log("이미 이모티콘 전송이 실행 중입니다.");
-            showToastInActiveTab("이모티콘 전송이 실행 중입니다");
+            TabUtils.showToastInActiveTab("이모티콘 전송이 실행 중입니다");
             return;
         }
 
-        if (currentTime - state.lastExecutionTime >= CONSTANTS.MANUAL_DELAY) {
-            sendEmoticonTriggerToActiveTab(false)
+        if (currentTime - stateManager.state.lastExecutionTime >= CONSTANTS.MANUAL_DELAY) {
+            stateManager.isExecuting = true;
+            TabUtils.sendEmoticonTriggerToActiveTab(false)
                 .then(() => {
-                    state.lastExecutionTime = Date.now();
-                }).catch(e => console.error("수동 입력 실패:", e));
+                    stateManager.state.lastExecutionTime = Date.now();
+                })
+                .catch(e => console.error("수동 입력 실패:", e))
+                .finally(() => {
+                    stateManager.isExecuting = false;
+                });
         } else {
             console.log("수동 입력 간격이 너무 짧습니다.");
-            showToastInActiveTab("잠시 후 다시 시도해주세요");
+            TabUtils.showToastInActiveTab("잠시 후 다시 시도해주세요");
         }
     } else if (command === "toggle-auto-send") {
         console.log("자동 입력 토글 단축키 감지:", command);
-        if (state.isAutoSending) {
-            stopAutoSend();
+        if (stateManager.isAutoSending) {
+            autoSendManager.stopAutoSend();
         } else {
-            startAutoSend();
+            autoSendManager.startAutoSend();
         }
     }
 });
