@@ -273,6 +273,13 @@ chrome.runtime.onInstalled.addListener(() => {
     });
     console.log('이모티콘 도우미 설치/업데이트됨. 기본 설정 확인.');
     stateManager.updateIconBadge();
+
+    chrome.contextMenus.create({
+        id: "addEmoticonToCache",
+        title: "이모티콘 추가",
+        contexts: ["image"],
+        documentUrlPatterns: ["https://chzzk.naver.com/*"]
+    });
 });
 
 chrome.runtime.onStartup.addListener(() => {
@@ -324,5 +331,26 @@ chrome.commands.onCommand.addListener((command) => {
         } else {
             autoSendManager.startAutoSend();
         }
+    }
+});
+
+// 컨텍스트 메뉴 클릭 처리
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+    if (info.menuItemId === "addEmoticonToCache") {
+        // DOM에서 alt 값을 가져오기 위해 content script에 메시지 전송
+        chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: (srcUrl) => {
+                const img = document.querySelector(`img[src="${srcUrl}"]`);
+                return img ? img.alt : null;
+            },
+            args: [info.srcUrl]
+        }).then(([{ result: alt }]) => {
+            chrome.tabs.sendMessage(tab.id, {
+                action: "addEmoticonToCache",
+                imageUrl: info.srcUrl,
+                title: alt || ""
+            });
+        });
     }
 });

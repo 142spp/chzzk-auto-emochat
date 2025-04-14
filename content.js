@@ -37,6 +37,20 @@ class EmoticonManager {
         this.cachedData = null;
     }
 
+    async handleContextMenuAdd(imageUrl, title) {
+        try {
+            const emoticonData = {
+                placeholder: title || imageUrl.split('/').pop(),
+                imageUrl: imageUrl
+            };
+            await this.addEmoticonToCache(emoticonData);
+            UIManager.showToast('이모티콘이 캐시에 추가되었습니다.');
+        } catch (error) {
+            console.error('이모티콘 추가 중 오류 발생:', error);
+            UIManager.showToast('이모티콘 추가 중 오류가 발생했습니다.');
+        }
+    }
+
     /**
      * 이모티콘 데이터를 가져옵니다.
      * @param {boolean} [useCache=true] - 캐시 사용 여부
@@ -45,15 +59,9 @@ class EmoticonManager {
     async getEmoticonData(useCache = true) {
         try {
             const result = await chrome.storage.local.get([CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE]);
-            this.cachedData = result[CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE];
 
             // 캐시된 데이터가 있고 캐시 사용이 허용된 경우
-            if (useCache && this.cachedData && Array.isArray(this.cachedData)) {
-                return this.cachedData.map(item => ({
-                    name: item.placeholder.replace(/[{}:]/g, ""),
-                    url: item.imageUrl
-                }));
-            }
+            if (useCache && result) return result[CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE];
 
             // 이모티콘 버튼 가져오기
             const emoticonButtons = document.querySelectorAll(CONSTANTS.SELECTORS.EMOTICON_BUTTON);
@@ -94,6 +102,35 @@ class EmoticonManager {
             return emoticons;
         } catch (error) {
             console.error('이모티콘 데이터 가져오기 중 오류:', error);
+            throw error;
+        }
+    }
+
+    async addEmoticonToCache(emoticonData) {
+        try {
+            let cachedEmoticons = await this.getEmoticonData();
+            emoticonData = {
+                name : emoticonData.placeholder.replace(/[{}:]/g, ""),
+                url : emoticonData.imageUrl
+            }
+
+            // 중복 체크
+            const isDuplicate = cachedEmoticons.some(item => 
+                item.name === emoticonData.name && 
+                item.url === emoticonData.url
+            );
+
+            if (!isDuplicate) {
+                cachedEmoticons.push(emoticonData);
+                await chrome.storage.local.set({
+                    [CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE]: cachedEmoticons
+                });
+                console.log('이모티콘이 캐시에 추가되었습니다.');
+            } else {
+                console.log('이미 캐시에 존재하는 이모티콘입니다.');
+            }
+        } catch (error) {
+            console.error('이모티콘 캐시 추가 중 오류 발생:', error);
             throw error;
         }
     }
@@ -325,6 +362,11 @@ class MessageHandler {
                 case "getEmoticons":
                     const emoticons = await this.emoticonManager.getEmoticonData();
                     sendResponse({ emoticons });
+                    break;
+
+                case "addEmoticonToCache":
+                    await this.emoticonManager.handleContextMenuAdd(message.imageUrl, message.title);
+                    sendResponse({ success: true });
                     break;
 
                 default:
