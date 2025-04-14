@@ -17,6 +17,9 @@ const CONSTANTS = {
         EMOTICON_BUTTON: "button.emoticon_emoticon__q2Sw6",
         INPUT_CONTAINER: ".live_chatting_input_container__qA0ad"
     },
+    STORAGE_KEYS: {
+        EMOTICON_CACHE: 'emoticonCache'
+    },
     TOAST: {
         DURATION: 2500,
         ID: 'chzzkMacroToast'
@@ -41,8 +44,11 @@ class EmoticonManager {
      */
     async getEmoticonData(useCache = true) {
         try {
+            const result = await chrome.storage.local.get([CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE]);
+            this.cachedData = result[CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE];
+
             // 캐시된 데이터가 있고 캐시 사용이 허용된 경우
-            if (useCache && this.cachedData) {
+            if (useCache && this.cachedData && Array.isArray(this.cachedData)) {
                 return this.cachedData.map(item => ({
                     name: item.placeholder.replace(/[{}:]/g, ""),
                     url: item.imageUrl
