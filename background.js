@@ -261,11 +261,11 @@ const autoSendManager = new AutoSendManager(stateManager);
 chrome.runtime.onInstalled.addListener(() => {
     chrome.storage.sync.get(Object.keys(CONSTANTS.DEFAULT_SETTINGS), (result) => {
         const updates = {};
-        Object.entries(CONSTANTS.DEFAULT_SETTINGS).forEach(([key, value]) => {
+        for (const [key, value] of Object.entries(CONSTANTS.DEFAULT_SETTINGS)) {
             if (result[key] === undefined) {
                 updates[key] = value;
             }
-        });
+        }
         
         if (Object.keys(updates).length > 0) {
             chrome.storage.sync.set(updates);
@@ -348,8 +348,10 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
         }).then(([{ result: alt }]) => {
             chrome.tabs.sendMessage(tab.id, {
                 action: "addEmoticonToCache",
-                imageUrl: info.srcUrl,
-                title: alt || ""
+                emoticonData : {
+                    url: info.srcUrl,
+                    name: alt
+                }
             });
         });
     }

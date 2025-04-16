@@ -28,121 +28,50 @@ const CONSTANTS = {
     MAIN_WORLD_VARS: {
         WORKING_CHAT: '__workingChat',
         WORKING_EMOTICON: '__workingEmoticon'
-    }
+    },
+    DEFAULT_EMOTICONS: [
+        { name: 'd_59', url: 'https://ssl.pstatic.net/static/nng/glive/icon/b_19.gif' },
+        { name: 'd_60', url: 'https://ssl.pstatic.net/static/nng/glive/icon/b_20.gif' },
+        { name: 'd_61', url: 'https://ssl.pstatic.net/static/nng/glive/icon/b_21.gif' },
+        { name: 'd_62', url: 'https://ssl.pstatic.net/static/nng/glive/icon/b_22.gif' },
+    ]
 };
 
 // --- 이모티콘 관리 클래스 ---
 class EmoticonManager {
     constructor() {
-        this.cachedData = null;
-    }
-
-    async handleContextMenuAdd(imageUrl, title) {
         try {
-            const emoticonData = {
-                placeholder: title || imageUrl.split('/').pop(),
-                imageUrl: imageUrl
-            };
-            await this.addEmoticonToCache(emoticonData);
-            UIManager.showToast('이모티콘이 캐시에 추가되었습니다.');
+            this.cachedEmoticons = chrome.storage.local.get([CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE]);
+            if (this.cachedEmoticons) {
+                this.cachedEmoticons = this.cachedEmoticons[CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE];
+            } else{
+                this.cachedEmoticons = CONSTANTS.DEFAULT_EMOTICONS;
+            }
         } catch (error) {
-            console.error('이모티콘 추가 중 오류 발생:', error);
-            UIManager.showToast('이모티콘 추가 중 오류가 발생했습니다.');
+            console.error('캐시 데이터를 가져오는 중 오류 발생:', error);
         }
     }
-
     /**
-     * 이모티콘 데이터를 가져옵니다.
-     * @param {boolean} [useCache=true] - 캐시 사용 여부
-     * @returns {Promise<Array<{name: string, url: string}>>}
-     */
-    async getEmoticonData(useCache = true) {
+     * 로컬 스토리지의 이모티콘 캐시를 현재 캐시된 데이터로 업데이트합니다.
+     * @returns {Promise<void>}
+    */
+    async updateEmoticon() {
         try {
-            const result = await chrome.storage.local.get([CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE]);
-
-            // 캐시된 데이터가 있고 캐시 사용이 허용된 경우
-            if (useCache && result) return result[CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE];
-
-            // 이모티콘 버튼 가져오기
-            const emoticonButtons = document.querySelectorAll(CONSTANTS.SELECTORS.EMOTICON_BUTTON);
-            if (emoticonButtons.length === 0) {
-                throw new Error("이모티콘 버튼을 찾을 수 없습니다. 이모티콘 팝업이 열려있는지 확인하세요.");
-            }
-
-            // 이모티콘 데이터 추출
-            const emoticons = Array.from(emoticonButtons)
-                .map(button => {
-                    const img = button.querySelector('img');
-                    if (!img) return null;
-
-                    const placeholder = img.getAttribute('alt');
-                    const imageUrl = img.getAttribute('src');
-
-                    if (!placeholder || !/^\{:.+:\}$/.test(placeholder) || !imageUrl) {
-                        return null;
-                    }
-
-                    return {
-                        name: placeholder.replace(/[{}:]/g, ""),
-                        url: imageUrl
-                    };
-                })
-                .filter(Boolean);
-
-            if (emoticons.length === 0) {
-                throw new Error("유효한 이모티콘 데이터를 찾을 수 없습니다.");
-            }
-
-            // 캐시 업데이트
-            this.cachedData = emoticons.map(item => ({
-                placeholder: `{:${item.name}:}`,
-                imageUrl: item.url
-            }));
-
-            return emoticons;
+            await chrome.storage.local.set({
+                [CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE]: this.cachedEmoticons
+            });
         } catch (error) {
-            console.error('이모티콘 데이터 가져오기 중 오류:', error);
-            throw error;
+            console.error('캐시 데이터를 업데이트하는 중 오류 발생:', error);
         }
     }
-
-    async addEmoticonToCache(emoticonData) {
-        try {
-            let cachedEmoticons = await this.getEmoticonData();
-            emoticonData = {
-                name : emoticonData.placeholder.replace(/[{}:]/g, ""),
-                url : emoticonData.imageUrl
-            }
-
-            // 중복 체크
-            const isDuplicate = cachedEmoticons.some(item => 
-                item.name === emoticonData.name && 
-                item.url === emoticonData.url
-            );
-
-            if (!isDuplicate) {
-                cachedEmoticons.push(emoticonData);
-                await chrome.storage.local.set({
-                    [CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE]: cachedEmoticons
-                });
-                console.log('이모티콘이 캐시에 추가되었습니다.');
-            } else {
-                console.log('이미 캐시에 존재하는 이모티콘입니다.');
-            }
-        } catch (error) {
-            console.error('이모티콘 캐시 추가 중 오류 발생:', error);
-            throw error;
-        }
-    }
-
     /**
      * 이모티콘 데이터를 준비합니다.
      * @returns {Promise<{success: boolean, data?: {editableArea: Element, newHtmlString: string, newWorkingChat: string, newEmoticonMap: Object}, error?: string}>}
-     */
-    async prepareEmoticonData() {
+    */
+    async prepareEmoticon() {
         try {
             const settings = await chrome.storage.sync.get(['minRepetitions', 'maxRepetitions']);
-            const availableEmoticons = await this.getEmoticonData();
+            const availableEmoticons = await this.cachedEmoticons;
 
             const minReps = Math.max(1, settings.minRepetitions || 1);
             const maxReps = Math.max(minReps, settings.maxRepetitions || 1);
@@ -189,15 +118,14 @@ class EmoticonManager {
             };
         }
     }
-
     /**
      * 이모티콘을 전송합니다.
      * @param {boolean} isAuto - 자동 전송 여부
      * @returns {Promise<boolean>} 전송 성공 여부
-     */
+    */
     async sendEmoticon(isAuto = false) {
         try {
-            const prepared = await this.prepareEmoticonData();
+            const prepared = await this.prepareEmoticon();
             if (!prepared.success) return false;
 
             const { editableArea, newHtmlString, newWorkingChat, newEmoticonMap } = prepared.data;
@@ -244,6 +172,46 @@ class EmoticonManager {
             return false;
         }
     }
+    /**
+    * 이모티콘 데이터를 캐시에 추가합니다.
+    * @param {Object} emoticonData - 추가할 이모티콘 데이터 객체
+    * @returns {Promise<void>}
+    * @throws {Error} 캐시에 추가하는 중 오류가 발생할 경우
+    */
+    async addEmoticon(emoticonData) {
+        try {
+            // 중복 체크
+            const isDuplicate = this.cachedEmoticons.some(item =>
+                item.name === emoticonData.name &&
+                item.url === emoticonData.url
+            );
+
+            if (!isDuplicate) {
+                this.cachedEmoticons.push(emoticonData);
+                await this.updateEmoticon();
+                console.log('이모티콘이 캐시에 추가되었습니다.');
+            } else {
+                console.log('이미 캐시에 존재하는 이모티콘입니다.');
+            }
+        } catch (error) {
+            console.error('이모티콘 캐시 추가 중 오류 발생:', error);
+            throw error;
+        }
+    }
+    /**
+     * 컨텍스트 메뉴에서 이모티콘을 캐시에 추가합니다.
+     * @param {Object} emoticonData - 추가할 이모티콘 데이터 객체
+     * @returns {Promise<void>}
+     */
+    async handleContextMenuAdd(emoticonData) {
+        try {
+            await this.addEmoticon(emoticonData);
+            UIManager.showToast('이모티콘이 캐시에 추가되었습니다.');
+        } catch (error) {
+            console.error('이모티콘 추가 중 오류 발생:', error);
+            UIManager.showToast('이모티콘 추가 중 오류가 발생했습니다.');
+        }
+    }
 }
 
 // --- Main World 관리 클래스 ---
@@ -270,9 +238,9 @@ class MainWorldManager {
      */
     static async setVariable(variableName, value) {
         try {
-            const response = await chrome.runtime.sendMessage({ 
-                type: "setVariable", 
-                value: { name: variableName, value: value } 
+            const response = await chrome.runtime.sendMessage({
+                type: "setVariable",
+                value: { name: variableName, value: value }
             });
             return response && response.success;
         } catch (error) {
@@ -365,7 +333,7 @@ class MessageHandler {
                     break;
 
                 case "addEmoticonToCache":
-                    await this.emoticonManager.handleContextMenuAdd(message.imageUrl, message.title);
+                    await this.emoticonManager.handleContextMenuAdd(message.url, message.name);
                     sendResponse({ success: true });
                     break;
 

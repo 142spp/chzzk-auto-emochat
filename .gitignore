@@ -2,3 +2,6 @@
 .cursor/
 
 # 기존 내용 
+.nx/installation
+.nx/cache
+.nx/workspace-data
