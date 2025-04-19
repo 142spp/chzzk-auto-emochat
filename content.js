@@ -44,37 +44,105 @@ class EmoticonManager {
         this.cachedEmoticons = CONSTANTS.DEFAULT_EMOTICONS; // 기본값으로 초기화
         this.selectedIndices = []; // 선택된 이모티콘 인덱스 배열
     }
+    
     /**
-     * 스토리지에서 이모티콘 캐시를 비동기적으로 로드하여 초기화합니다.
+     * 스토리지에서 이모티콘 데이터와 선택 상태를 로드합니다.
      * @returns {Promise<void>}
      */
     async initialize() {
         try {
+            // 1. 스토리지에서 캐시 데이터와 선택 상태 로드
             const result = await chrome.storage.local.get([
                 CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE,
                 CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS
             ]);
             
-            // 이모티콘 캐시 로드
+            // 2. 이모티콘 캐시 데이터 처리
             if (result && Array.isArray(result[CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE])) {
                 this.cachedEmoticons = result[CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE];
-                console.log("저장된 이모티콘 캐시 로드 완료.");
+                console.log(`이모티콘 캐시 로드 완료 (${this.cachedEmoticons.length}개)`);
             } else {
-                console.log("저장된 이모티콘 캐시 없음 또는 형식이 잘못됨. 기본 이모티콘 사용.");
+                console.log("유효한 이모티콘 캐시 없음, 기본 이모티콘 사용");
             }
             
-            // 선택된 인덱스 로드
+            // 3. 선택된 인덱스 처리
             if (result && Array.isArray(result[CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS])) {
                 this.selectedIndices = result[CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS];
-                console.log(`선택된 이모티콘 인덱스 로드 완료. (${this.selectedIndices.length}개)`);
+                console.log(`선택된 이모티콘 로드 완료 (${this.selectedIndices.length}개 활성화)`);
             } else {
-                // 기본적으로 모든 이모티콘 선택 (처음 사용 시)
+                // 기본적으로 모든 이모티콘 선택 상태로 설정
                 this.selectedIndices = Array.from({ length: this.cachedEmoticons.length }, (_, i) => i);
-                console.log("선택된 이모티콘 인덱스 없음. 모든 이모티콘을 선택 상태로 설정.");
+                console.log(`선택 정보 없음, 모든 이모티콘 활성화 (${this.selectedIndices.length}개)`);
+                
+                // 스토리지에 기본 선택 상태 저장
+                await this.saveSelectedIndices();
             }
         } catch (error) {
-            console.error('캐시 데이터를 가져오는 중 오류 발생:', error);
+            console.error('이모티콘 초기화 중 오류:', error);
+            UIManager.showToast('이모티콘 초기화 중 오류 발생');
         }
+    }
+    
+    /**
+     * 현재 선택된 인덱스를 스토리지에 저장합니다.
+     * @returns {Promise<void>}
+     */
+    async saveSelectedIndices() {
+        try {
+            await chrome.storage.local.set({
+                [CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS]: this.selectedIndices
+            });
+            console.log(`선택된 이모티콘 인덱스 저장 완료 (${this.selectedIndices.length}개)`);
+        } catch (error) {
+            console.error('선택 상태 저장 중 오류:', error);
+        }
+    }
+    
+    /**
+     * 사용 가능한 이모티콘 목록을 반환합니다. (선택된 이모티콘만)
+     * @returns {Array} 사용 가능한 이모티콘 배열
+     */
+    getAvailableEmoticons() {
+        // 1. 선택된 인덱스가 비어있으면 모든 이모티콘 사용
+        if (!this.selectedIndices || this.selectedIndices.length === 0) {
+            console.log("선택된 이모티콘 없음 - 모든 이모티콘 사용");
+            return [...this.cachedEmoticons];
+        }
+        
+        // 2. 선택된 인덱스에 해당하는 이모티콘만 필터링
+        const selectedEmoticons = this.selectedIndices
+            .filter(index => index >= 0 && index < this.cachedEmoticons.length)
+            .map(index => this.cachedEmoticons[index]);
+            
+        console.log(`선택된 이모티콘 ${selectedEmoticons.length}개 사용 준비 완료`);
+        
+        // 3. 안전장치: 필터링된 결과가 비어있으면 모든 이모티콘 사용
+        if (selectedEmoticons.length === 0) {
+            console.log("선택된 이모티콘 필터링 결과 없음 - 모든 이모티콘 사용");
+            return [...this.cachedEmoticons];
+        }
+        
+        return selectedEmoticons;
+    }
+    
+    /**
+     * 현재 선택된 이모티콘 목록을 업데이트합니다.
+     * @param {Array<number>} newIndices - 새 선택 인덱스 배열
+     * @returns {Promise<void>}
+     */
+    async updateSelectedEmoticons(newIndices) {
+        // 1. 유효성 검증
+        if (!Array.isArray(newIndices)) {
+            console.error("updateSelectedEmoticons: 유효하지 않은 인덱스 배열");
+            return;
+        }
+        
+        // 2. 메모리 상태 업데이트
+        this.selectedIndices = newIndices;
+        console.log(`선택된 이모티콘 인덱스 업데이트 (${newIndices.length}개 활성화)`);
+        
+        // 3. 변경사항 저장 (선택 사항)
+        // await this.saveSelectedIndices(); // 일반적으로 팝업에서 이미 저장함
     }
     
     /**
@@ -89,29 +157,6 @@ class EmoticonManager {
         } catch (error) {
             console.error('캐시 데이터를 업데이트하는 중 오류 발생:', error);
         }
-    }
-    
-    /**
-     * 사용 가능한 이모티콘 목록을 반환합니다.
-     * 선택된 이모티콘이 있으면 선택된 것만 반환하고, 없으면 모든 이모티콘을 반환합니다.
-     * @returns {Array} 사용 가능한 이모티콘 배열
-     */
-    getAvailableEmoticons() {
-        // 선택된 인덱스가 없거나 비어있으면 모든 이모티콘 반환
-        if (!this.selectedIndices || this.selectedIndices.length === 0) {
-            console.log("선택된 이모티콘 없음. 모든 이모티콘 사용.");
-            return [...this.cachedEmoticons];
-        }
-        
-        // 선택된 인덱스에 해당하는 이모티콘만 필터링하여 반환
-        const selectedEmoticons = this.selectedIndices
-            .filter(index => index >= 0 && index < this.cachedEmoticons.length)
-            .map(index => this.cachedEmoticons[index]);
-            
-        console.log(`선택된 이모티콘 ${selectedEmoticons.length}개 사용.`);
-        
-        // 선택된 이모티콘이 없다면 모든 이모티콘 반환 (안전장치)
-        return selectedEmoticons.length > 0 ? selectedEmoticons : [...this.cachedEmoticons];
     }
     
     /**
@@ -371,57 +416,87 @@ class MessageHandler {
      * @param {Function} sendResponse - 응답 함수
      */
     async handleMessage(message, sender, sendResponse) {
-        console.log("Content script 메시지 수신:", message);
+        console.log(`메시지 수신: [${message.action}]`, message);
 
         try {
             switch (message.action) {
+                // 토스트 메시지 표시 요청 처리
                 case "showToast":
                     UIManager.showToast(message.message);
                     sendResponse({ success: true });
                     break;
 
+                // 이모티콘 전송 요청 처리 (자동/수동)
                 case "injectAndSendTrigger":
+                    console.log(`이모티콘 전송 요청 (자동: ${message.isAuto})`);
                     const success = await this.emoticonManager.sendEmoticon(message.isAuto);
+                    
+                    if (success) {
+                        console.log("이모티콘 전송 성공");
+                    } else {
+                        console.error("이모티콘 전송 실패");
+                    }
+                    
                     sendResponse({ success });
                     break;
 
+                // 이모티콘 목록 요청 처리 (팝업에서 호출)
                 case "getEmoticons":
-                    const emoticons = this.emoticonManager.cachedEmoticons;
+                    console.log("이모티콘 목록 요청됨");
                     sendResponse({ 
-                        emoticons,
-                        selectedIndices: this.emoticonManager.selectedIndices 
+                        emoticons: this.emoticonManager.cachedEmoticons,
+                        selectedIndices: this.emoticonManager.selectedIndices
                     });
+                    console.log(`이모티콘 목록 응답: ${this.emoticonManager.cachedEmoticons.length}개 캐시됨, ${this.emoticonManager.selectedIndices.length}개 선택됨`);
                     break;
 
+                // 이모티콘 캐시 추가 요청 처리 (컨텍스트 메뉴)
                 case "addEmoticonToCache":
+                    console.log("이모티콘 추가 요청됨:", message.emoticonData);
                     await this.emoticonManager.handleContextMenuAdd(message.emoticonData);
                     sendResponse({ success: true });
                     break;
 
-                case "emoticonCacheUpdated": // 캐시 업데이트 알림 수신
-                    console.log("이모티콘 캐시 업데이트 알림 수신. 캐시를 다시 로드합니다.");
-                    await this.emoticonManager.initialize(); // 캐시 다시 로드
+                // 캐시 업데이트 알림 수신 (팝업에서 호출)
+                case "emoticonCacheUpdated":
+                    console.log("캐시 업데이트 알림 수신 - 캐시 다시 로드");
+                    await this.emoticonManager.initialize();
                     sendResponse({ success: true });
                     break;
                     
-                case "updateSelectedEmoticons": // 선택된 이모티콘 인덱스 업데이트
+                // 선택된 이모티콘 인덱스 업데이트 요청 (팝업에서 호출)
+                case "updateSelectedEmoticons":
+                    console.log(`선택된 이모티콘 업데이트 요청: ${message.selectedIndices?.length || 0}개`);
+                    
                     if (Array.isArray(message.selectedIndices)) {
-                        this.emoticonManager.selectedIndices = message.selectedIndices;
-                        console.log(`선택된 이모티콘 인덱스 업데이트됨 (${message.selectedIndices.length}개)`);
-                        sendResponse({ success: true });
+                        await this.emoticonManager.updateSelectedEmoticons(message.selectedIndices);
+                        sendResponse({ 
+                            success: true,
+                            message: `${message.selectedIndices.length}개 이모티콘 선택됨`
+                        });
                     } else {
-                        console.error("올바르지 않은 selectedIndices 형식");
-                        sendResponse({ success: false, error: "올바르지 않은 selectedIndices 형식" });
+                        console.error("잘못된 selectedIndices 형식:", message.selectedIndices);
+                        sendResponse({ 
+                            success: false, 
+                            error: "올바르지 않은 선택 인덱스 형식" 
+                        });
                     }
                     break;
 
+                // 알 수 없는 메시지 타입 처리
                 default:
-                    console.warn("알 수 없는 메시지 타입:", message.action);
-                    sendResponse({ success: false, error: "알 수 없는 메시지 타입" });
+                    console.warn(`알 수 없는 메시지 타입: ${message.action}`);
+                    sendResponse({ 
+                        success: false, 
+                        error: "알 수 없는 메시지 타입" 
+                    });
             }
         } catch (error) {
-            console.error("메시지 처리 중 오류 발생:", error);
-            sendResponse({ success: false, error: error.message });
+            console.error(`메시지 처리 중 오류 (${message.action}):`, error);
+            sendResponse({ 
+                success: false, 
+                error: error.message 
+            });
         }
     }
 }

@@ -49,51 +49,65 @@ class EmoticonManager {
      */
     async loadEmoticonList() {
         try {
+            console.log("이모티콘 목록 로드 중...");
+            
+            // 1. 스토리지에서 이모티콘 캐시와 선택 상태 로드
             const result = await chrome.storage.local.get([
                 CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE,
                 CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS
             ]);
+            
             const emoticons = result[CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE] || [];
             const selectedIndices = new Set(result[CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS] || []);
+            
+            console.log(`이모티콘 ${emoticons.length}개, 선택됨 ${selectedIndices.size}개`);
 
-            // 이모티콘 목록 비우기
+            // 2. 이모티콘 목록 UI 초기화
             this.emoticonList.innerHTML = '';
 
-            // 각 이모티콘에 대한 UI 요소 생성
+            // 3. 각 이모티콘에 대한 UI 요소 생성
             emoticons.forEach((emoticon, index) => {
+                // 3.1 이모티콘 아이템 컨테이너 생성
                 const item = document.createElement('div');
                 item.className = 'emoticon-item';
                 item.dataset.index = index; // 인덱스 저장
-
+                
+                // 3.2 이모티콘 이미지 생성
                 const img = document.createElement('img');
                 img.src = emoticon.url;
                 img.alt = emoticon.name;
+                img.title = emoticon.name; // 툴팁 추가
 
-                // 삭제 버튼 추가
+                // 3.3 삭제 버튼 추가
                 const removeBtn = document.createElement('span');
                 removeBtn.className = 'remove-btn';
                 removeBtn.textContent = '×';
                 removeBtn.title = '이모티콘 제거';
                 removeBtn.addEventListener('click', (event) => {
-                    event.stopPropagation();
-                    this.removeEmoticon(index); // 직접 인덱스 전달
+                    event.stopPropagation(); // 이벤트 버블링 방지
+                    this.removeEmoticon(index);
                 });
 
+                // 3.4 컴포넌트 조립
                 item.appendChild(img);
                 item.appendChild(removeBtn);
+                
+                // 3.5 클릭 이벤트 추가 (선택/해제 토글)
                 item.addEventListener('click', () => this.toggleEmoticonSelection(index));
 
-                // 선택 상태 적용
+                // 3.6 선택 상태 적용
                 if (selectedIndices.has(index)) {
                     item.classList.add('selected');
                 }
 
+                // 3.7 DOM에 추가
                 this.emoticonList.appendChild(item);
             });
 
-            // 선택 상태 복원 로직은 이제 여기에 통합됨 (selectedIndices 사용)
+            console.log("이모티콘 목록 UI 생성 완료");
 
         } catch (error) {
+            console.error("이모티콘 목록 로드 실패:", error);
             UIManager.showStatus("이모티콘 목록 로드 실패", "error");
         }
     }
@@ -104,20 +118,30 @@ class EmoticonManager {
      */
     async toggleEmoticonSelection(index) {
         try {
+            // 1. 현재 선택 상태 로드
             const result = await chrome.storage.local.get([CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS]);
             let selectedIndices = new Set(result[CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS] || []);
-
+            
+            // 2. 토글 처리
             if (selectedIndices.has(index)) {
-                selectedIndices.delete(index);
+                selectedIndices.delete(index); // 선택 해제
+                console.log(`이모티콘 #${index} 선택 해제됨`);
             } else {
-                selectedIndices.add(index);
+                selectedIndices.add(index); // 선택
+                console.log(`이모티콘 #${index} 선택됨`);
             }
 
-            await this.saveSelectionState(selectedIndices); // 수정된 Set 저장
-            this.updateSelectionUI(selectedIndices); // UI 즉시 업데이트
+            // 3. 변경사항 저장 및 UI 업데이트
+            await this.saveSelectionState(selectedIndices);
+            this.updateSelectionUI(selectedIndices);
+            
+            // 4. 알림 표시 (선택사항)
+            const status = selectedIndices.has(index) ? "선택됨" : "선택 해제됨";
+            UIManager.showStatus(`이모티콘 ${status}`, "info");
 
         } catch (error) {
-            console.error('[toggleSelection] 선택 상태 토글 중 오류:', error);
+            console.error('이모티콘 선택 토글 중 오류:', error);
+            UIManager.showStatus("이모티콘 선택 변경 실패", "error");
         }
     }
 
@@ -126,30 +150,58 @@ class EmoticonManager {
      * @param {Set<number>} selectedIndices - 현재 선택된 인덱스 Set
      */
     updateSelectionUI(selectedIndices) {
+        // 모든 이모티콘 항목에 선택 상태 적용
         const items = this.emoticonList.querySelectorAll('.emoticon-item');
         items.forEach((item) => {
-            const index = parseInt(item.dataset.index, 10); // 저장된 인덱스 가져오기
+            const index = parseInt(item.dataset.index, 10);
+            
+            // 선택 상태에 따라 클래스 추가/제거
             if (selectedIndices.has(index)) {
                 item.classList.add('selected');
             } else {
                 item.classList.remove('selected');
             }
         });
+        
+        console.log(`UI 업데이트: ${selectedIndices.size}개 이모티콘 선택됨`);
+        
+        // 선택된 이모티콘 수에 따라 버튼 활성화/비활성화 (선택사항)
+        this.updateSelectionButtonStates(selectedIndices.size);
+    }
+    
+    /**
+     * 선택/해제 버튼 상태를
+     * @param {number} selectedCount - 선택된 이모티콘 수
+     */
+    updateSelectionButtonStates(selectedCount) {
+        // "전체 선택" 버튼 상태 업데이트
+        if (this.selectAllBtn) {
+            this.selectAllBtn.disabled = false;
+        }
+        
+        // "전체 해제" 버튼 상태 업데이트
+        if (this.deselectAllBtn) {
+            this.deselectAllBtn.disabled = selectedCount === 0;
+        }
     }
 
 
     /**
-     * 선택 상태를 스토리지에 저장합니다.
+     * 선택 상태를 스토리지에 저장하고 content.js에 알립니다.
      * @param {Set<number>} selectedIndices - 저장할 선택된 인덱스 Set
      */
     async saveSelectionState(selectedIndices) {
         try {
+            // 1. 배열로 변환
             const selectionArray = Array.from(selectedIndices);
+            
+            // 2. 로컬 스토리지에 저장
             await chrome.storage.local.set({
                 [CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS]: selectionArray
             });
+            console.log(`선택 상태 저장됨: ${selectionArray.length}개 이모티콘 선택`);
             
-            // 활성 치지직 탭에 선택된 이모티콘 인덱스 변경을 알림
+            // 3. 활성 탭의 content.js에 알림
             try {
                 const tabs = await chrome.tabs.query({
                     active: true,
@@ -158,16 +210,24 @@ class EmoticonManager {
                 });
                 
                 if (tabs.length > 0) {
+                    // 메시지 전송 (비동기)
                     chrome.tabs.sendMessage(tabs[0].id, {
                         action: "updateSelectedEmoticons",
                         selectedIndices: selectionArray
-                    }).catch(err => console.log("선택 인덱스 업데이트 실패:", err));
+                    }).then(() => {
+                        console.log("선택 상태 알림 전송 성공");
+                    }).catch(err => {
+                        console.error("선택 상태 알림 전송 실패:", err);
+                    });
+                } else {
+                    console.log("알림 전송 가능한 치지직 탭 없음");
                 }
             } catch (error) {
-                console.error("활성 탭에 선택 인덱스 업데이트 알림 실패:", error);
+                console.error("선택 상태 알림 전송 중 오류:", error);
             }
         } catch (error) {
-            console.error('[saveSelectionState] 선택 상태 저장 중 오류:', error);
+            console.error('선택 상태 저장 중 오류:', error);
+            UIManager.showStatus("선택 상태 저장 실패", "error");
         }
     }
 
