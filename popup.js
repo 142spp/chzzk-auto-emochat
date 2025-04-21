@@ -3,8 +3,7 @@ const CONSTANTS = {
     STORAGE_KEYS: {
         SETTINGS: 'settings',
         SHORTCUTS: 'shortcuts',
-        EMOTICON_CACHE: 'emoticonCache',
-        SELECTED_EMOTICONS: 'selectedEmoticons'
+        EMOTICON_CACHE: 'emoticonCache'
     },
     DEFAULT_SETTINGS: {
         minRepetitions: 4,
@@ -24,23 +23,15 @@ const CONSTANTS = {
 // --- 이모티콘 관리 클래스 ---
 class EmoticonManager {
     constructor() {
-        this.emoticonList = document.getElementById('emoticonList');
-        this.selectAllBtn = document.getElementById('selectAllBtn');
-        this.deselectAllBtn = document.getElementById('deselectAllBtn');
+        this.emoticonListElement = document.getElementById('emoticonList');
     }
 
     /**
      * 이모티콘 관리자 초기화 (이벤트 리스너 등록 및 초기 목록 로드)
      */
     async initialize() {
-        // 이벤트 리스너 등록
-        if (this.selectAllBtn) {
-            this.selectAllBtn.addEventListener('click', () => this.selectAllEmoticons());
-        }
-        if (this.deselectAllBtn) {
-            this.deselectAllBtn.addEventListener('click', () => this.deselectAllEmoticons());
-        }
-        // 초기 이모티콘 목록 로드
+        document.getElementById('selectAllBtn')?.addEventListener('click', () => this.selectAllEmoticons());
+        document.getElementById('deselectAllBtn')?.addEventListener('click', () => this.deselectAllEmoticons());
         await this.loadEmoticonList();
     }
 
@@ -49,234 +40,146 @@ class EmoticonManager {
      */
     async loadEmoticonList() {
         try {
-            console.log("이모티콘 목록 로드 중...");
-            
-            // 1. 스토리지에서 이모티콘 캐시와 선택 상태 로드
             const result = await chrome.storage.local.get([
-                CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE,
-                CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS
+                CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE
             ]);
             
             const emoticons = result[CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE] || [];
-            const selectedIndices = new Set(result[CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS] || []);
             
-            console.log(`이모티콘 ${emoticons.length}개, 선택됨 ${selectedIndices.size}개`);
+            console.log(`로드된 이모티콘 ${emoticons.length}개`);
 
-            // 2. 이모티콘 목록 UI 초기화
-            this.emoticonList.innerHTML = '';
+            this.emoticonListElement.innerHTML = '';
+            let selectedCount = 0;
 
-            // 3. 각 이모티콘에 대한 UI 요소 생성
-            emoticons.forEach((emoticon, index) => {
-                // 3.1 이모티콘 아이템 컨테이너 생성
+            emoticons.forEach((emoticon) => {
                 const item = document.createElement('div');
                 item.className = 'emoticon-item';
-                item.dataset.index = index; // 인덱스 저장
+                item.dataset.name = emoticon.name;
                 
-                // 3.2 이모티콘 이미지 생성
                 const img = document.createElement('img');
                 img.src = emoticon.url;
                 img.alt = emoticon.name;
-                img.title = emoticon.name; // 툴팁 추가
+                img.title = emoticon.name;
 
-                // 3.3 삭제 버튼 추가
                 const removeBtn = document.createElement('span');
                 removeBtn.className = 'remove-btn';
                 removeBtn.textContent = '×';
                 removeBtn.title = '이모티콘 제거';
                 removeBtn.addEventListener('click', (event) => {
-                    event.stopPropagation(); // 이벤트 버블링 방지
-                    this.removeEmoticon(index);
+                    event.stopPropagation();
+                    this.removeEmoticon(emoticon.name);
                 });
 
-                // 3.4 컴포넌트 조립
                 item.appendChild(img);
                 item.appendChild(removeBtn);
-                
-                // 3.5 클릭 이벤트 추가 (선택/해제 토글)
-                item.addEventListener('click', () => this.toggleEmoticonSelection(index));
+                item.addEventListener('click', () => this.toggleEmoticonSelection(emoticon.name));
 
-                // 3.6 선택 상태 적용
-                if (selectedIndices.has(index)) {
+                if (emoticon.selected) {
                     item.classList.add('selected');
+                    selectedCount++;
                 }
 
-                // 3.7 DOM에 추가
-                this.emoticonList.appendChild(item);
+                this.emoticonListElement.appendChild(item);
             });
 
-            console.log("이모티콘 목록 UI 생성 완료");
+            console.log(`이모티콘 목록 UI 생성 완료, 선택됨: ${selectedCount}개`);
+            this.updateSelectionButtonStates(selectedCount, emoticons.length);
 
         } catch (error) {
             console.error("이모티콘 목록 로드 실패:", error);
-            UIManager.showStatus("이모티콘 목록 로드 실패", "error");
+            this.showStatus("이모티콘 목록 로드 실패", true);
         }
     }
 
     /**
      * 이모티콘 선택 상태를 토글합니다.
-     * @param {number} index - 토글할 이모티콘의 인덱스
+     * @param {string} nameToToggle - 토글할 이모티콘의 이름
      */
-    async toggleEmoticonSelection(index) {
+    async toggleEmoticonSelection(nameToToggle) {
         try {
-            // 1. 현재 선택 상태 로드
-            const result = await chrome.storage.local.get([CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS]);
-            let selectedIndices = new Set(result[CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS] || []);
+            const result = await chrome.storage.local.get([CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE]);
+            let emoticons = result[CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE] || [];
             
-            // 2. 토글 처리
-            if (selectedIndices.has(index)) {
-                selectedIndices.delete(index); // 선택 해제
-                console.log(`이모티콘 #${index} 선택 해제됨`);
-            } else {
-                selectedIndices.add(index); // 선택
-                console.log(`이모티콘 #${index} 선택됨`);
-            }
+            const emoticon = emoticons.find(e => e.name === nameToToggle);
+            if (emoticon) {
+                emoticon.selected = !emoticon.selected;
+                console.log(`이모티콘 "${nameToToggle}" 선택 상태 변경: ${emoticon.selected}`);
 
-            // 3. 변경사항 저장 및 UI 업데이트
-            await this.saveSelectionState(selectedIndices);
-            this.updateSelectionUI(selectedIndices);
-            
-            // 4. 알림 표시 (선택사항)
-            const status = selectedIndices.has(index) ? "선택됨" : "선택 해제됨";
-            UIManager.showStatus(`이모티콘 ${status}`, "info");
+                await chrome.storage.local.set({
+                    [CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE]: emoticons
+                });
+
+                const itemElement = this.emoticonListElement.querySelector(`[data-name="${nameToToggle}"]`);
+                if (itemElement) {
+                    itemElement.classList.toggle('selected', emoticon.selected);
+                }
+
+                const selectedCount = emoticons.filter(e => e.selected).length;
+                this.updateSelectionButtonStates(selectedCount, emoticons.length);
+                const status = emoticon.selected ? "선택됨" : "선택 해제됨";
+                this.showStatus(`이모티콘 ${status}`, false);
+
+                this.notifyContentScriptCacheUpdate();
+
+            } else {
+                console.warn(`이름 "${nameToToggle}"에 해당하는 이모티콘을 찾을 수 없습니다.`);
+                this.showStatus("이모티콘 상태 변경 실패", true);
+            }
 
         } catch (error) {
             console.error('이모티콘 선택 토글 중 오류:', error);
-            UIManager.showStatus("이모티콘 선택 변경 실패", "error");
+            this.showStatus("이모티콘 선택 변경 실패", true);
         }
     }
 
     /**
-     * 선택 상태 UI를 즉시 업데이트합니다. (스토리지 읽기 없이)
-     * @param {Set<number>} selectedIndices - 현재 선택된 인덱스 Set
-     */
-    updateSelectionUI(selectedIndices) {
-        // 모든 이모티콘 항목에 선택 상태 적용
-        const items = this.emoticonList.querySelectorAll('.emoticon-item');
-        items.forEach((item) => {
-            const index = parseInt(item.dataset.index, 10);
-            
-            // 선택 상태에 따라 클래스 추가/제거
-            if (selectedIndices.has(index)) {
-                item.classList.add('selected');
-            } else {
-                item.classList.remove('selected');
-            }
-        });
-        
-        console.log(`UI 업데이트: ${selectedIndices.size}개 이모티콘 선택됨`);
-        
-        // 선택된 이모티콘 수에 따라 버튼 활성화/비활성화 (선택사항)
-        this.updateSelectionButtonStates(selectedIndices.size);
-    }
-    
-    /**
-     * 선택/해제 버튼 상태를
+     * 선택/해제 버튼 상태를 업데이트합니다.
      * @param {number} selectedCount - 선택된 이모티콘 수
+     * @param {number} totalCount - 전체 이모티콘 수
      */
-    updateSelectionButtonStates(selectedCount) {
-        // "전체 선택" 버튼 상태 업데이트
-        if (this.selectAllBtn) {
-            this.selectAllBtn.disabled = false;
-        }
+    updateSelectionButtonStates(selectedCount, totalCount) {
+        const selectAllBtn = document.getElementById('selectAllBtn');
+        const deselectAllBtn = document.getElementById('deselectAllBtn');
         
-        // "전체 해제" 버튼 상태 업데이트
-        if (this.deselectAllBtn) {
-            this.deselectAllBtn.disabled = selectedCount === 0;
+        if (selectAllBtn) {
+            selectAllBtn.disabled = selectedCount === totalCount && totalCount > 0;
+        }
+        if (deselectAllBtn) {
+            deselectAllBtn.disabled = selectedCount === 0;
         }
     }
-
 
     /**
-     * 선택 상태를 스토리지에 저장하고 content.js에 알립니다.
-     * @param {Set<number>} selectedIndices - 저장할 선택된 인덱스 Set
+     * 특정 이름의 이모티콘을 캐시에서 제거합니다.
+     * @param {string} nameToRemove - 제거할 이모티콘의 이름
      */
-    async saveSelectionState(selectedIndices) {
+    async removeEmoticon(nameToRemove) {
         try {
-            // 1. 배열로 변환
-            const selectionArray = Array.from(selectedIndices);
-            
-            // 2. 로컬 스토리지에 저장
-            await chrome.storage.local.set({
-                [CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS]: selectionArray
-            });
-            console.log(`선택 상태 저장됨: ${selectionArray.length}개 이모티콘 선택`);
-            
-            // 3. 활성 탭의 content.js에 알림
-            try {
-                const tabs = await chrome.tabs.query({
-                    active: true,
-                    currentWindow: true,
-                    url: "*://*.chzzk.naver.com/*"
-                });
-                
-                if (tabs.length > 0) {
-                    // 메시지 전송 (비동기)
-                    chrome.tabs.sendMessage(tabs[0].id, {
-                        action: "updateSelectedEmoticons",
-                        selectedIndices: selectionArray
-                    }).then(() => {
-                        console.log("선택 상태 알림 전송 성공");
-                    }).catch(err => {
-                        console.error("선택 상태 알림 전송 실패:", err);
-                    });
-                } else {
-                    console.log("알림 전송 가능한 치지직 탭 없음");
-                }
-            } catch (error) {
-                console.error("선택 상태 알림 전송 중 오류:", error);
-            }
-        } catch (error) {
-            console.error('선택 상태 저장 중 오류:', error);
-            UIManager.showStatus("선택 상태 저장 실패", "error");
-        }
-    }
-
-     /**
-     * 특정 인덱스의 이모티콘을 캐시와 선택 상태에서 제거합니다.
-     * @param {number} indexToRemove - 제거할 이모티콘의 인덱스
-     */
-     async removeEmoticon(indexToRemove) {
-        try {
-            // 스토리지에서 현재 데이터 가져오기
-            const result = await chrome.storage.local.get([
-                CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE,
-                CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS
-            ]);
+            const result = await chrome.storage.local.get([CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE]);
             let emoticons = result[CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE] || [];
-            let selectedIndicesSet = new Set(result[CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS] || []);
 
-            // 인덱스 유효성 검사
-            if (indexToRemove < 0 || indexToRemove >= emoticons.length) {
-                return;
+            const arrayIndexToRemove = emoticons.findIndex(e => e.name === nameToRemove);
+
+            if (arrayIndexToRemove === -1) {
+                 console.warn(`제거할 이모티콘 이름 "${nameToRemove}" 찾기 실패`);
+                 this.showStatus("이모티콘 제거 실패", true);
+                 return;
             }
 
-            // 메모리에서 제거 (로컬 변수)
-            const removedEmoticon = emoticons.splice(indexToRemove, 1)[0];
+            const removedEmoticon = emoticons.splice(arrayIndexToRemove, 1)[0];
+            console.log(`이모티콘 "${nameToRemove}" 제거됨`);
 
-            // 선택 상태 업데이트 (삭제된 인덱스 이후의 인덱스들을 조정)
-            const newSelectedIndices = new Set();
-            for (const selectedIndex of selectedIndicesSet) {
-                if (selectedIndex < indexToRemove) {
-                    newSelectedIndices.add(selectedIndex);
-                } else if (selectedIndex > indexToRemove) {
-                    newSelectedIndices.add(selectedIndex - 1); // 인덱스 1 감소
-                }
-            }
-            
-            // 변경된 캐시와 선택 상태를 스토리지에 저장
             await chrome.storage.local.set({
-                [CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE]: emoticons, // 수정된 캐시 저장
-                [CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS]: Array.from(newSelectedIndices) // 수정된 선택 상태 저장
+                [CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE]: emoticons
             });
 
-            // UI 갱신 (목록을 다시 로드하여 스토리지 최신 상태 반영)
             await this.loadEmoticonList();
-
-            // content.js에 알림
+            this.showStatus(`이모티콘 "${removedEmoticon.name}" 제거됨`, false);
             this.notifyContentScriptCacheUpdate();
 
         } catch (error) {
-            UIManager.showStatus("이모티콘 제거 중 오류 발생", "error");
+            console.error("이모티콘 제거 중 오류:", error);
+            this.showStatus("이모티콘 제거 중 오류 발생", true);
         }
     }
 
@@ -284,17 +187,27 @@ class EmoticonManager {
      * 모든 이모티콘을 선택합니다.
      */
     async selectAllEmoticons() {
-        try {
-            // 전체 개수 확인을 위해 캐시 로드
+         try {
              const result = await chrome.storage.local.get([CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE]);
-             const emoticons = result[CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE] || [];
-             const allIndices = new Set(Array.from({ length: emoticons.length }, (_, i) => i));
+             let emoticons = result[CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE] || [];
 
-             await this.saveSelectionState(allIndices);
-             this.updateSelectionUI(allIndices); // UI 즉시 업데이트
-        } catch (error) {
+             if (emoticons.length === 0) return;
+
+             emoticons.forEach(e => e.selected = true);
+
+             await chrome.storage.local.set({
+                 [CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE]: emoticons
+             });
+
+             await this.loadEmoticonList();
+             this.showStatus("모든 이모티콘 선택됨", false);
+
+             this.notifyContentScriptCacheUpdate();
+
+         } catch (error) {
              console.error('[selectAllEmoticons] 전체 선택 중 오류:', error);
-        }
+             this.showStatus("전체 선택 중 오류 발생", true);
+         }
     }
 
     /**
@@ -302,14 +215,37 @@ class EmoticonManager {
      */
     async deselectAllEmoticons() {
          try {
-             const emptyIndices = new Set();
-             await this.saveSelectionState(emptyIndices);
-             this.updateSelectionUI(emptyIndices); // UI 즉시 업데이트
+             const result = await chrome.storage.local.get([CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE]);
+             let emoticons = result[CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE] || [];
+
+             if (emoticons.length === 0) return;
+
+             let changed = false;
+             emoticons.forEach(e => {
+                 if (e.selected) {
+                     e.selected = false;
+                     changed = true;
+                 }
+             });
+
+             if (changed) {
+                 await chrome.storage.local.set({
+                     [CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE]: emoticons
+                 });
+
+                 await this.loadEmoticonList();
+                 this.showStatus("모든 이모티콘 선택 해제됨", false);
+
+                 this.notifyContentScriptCacheUpdate();
+             } else {
+                 this.showStatus("선택된 이모티콘이 없습니다.", false);
+             }
+
          } catch (error) {
              console.error('[deselectAllEmoticons] 전체 해제 중 오류:', error);
+             this.showStatus("전체 해제 중 오류 발생", true);
          }
     }
-
 
     /**
      * content.js에 이모티콘 캐시가 업데이트되었음을 알립니다.
@@ -324,11 +260,31 @@ class EmoticonManager {
 
             if (tabs.length > 0) {
                 const tabId = tabs[0].id;
-                await chrome.tabs.sendMessage(tabId, { action: "emoticonCacheUpdated" });
+                chrome.tabs.sendMessage(tabId, { action: "emoticonCacheUpdated" })
+                    .then(() => console.log("Content script에 캐시 업데이트 알림 전송 성공"))
+                    .catch(err => {
+                        if (err.message?.includes("Receiving end does not exist")) {
+                            console.warn("Content script 연결 불가 (탭 로딩 중이거나 관련 없는 페이지일 수 있음)");
+                        } else {
+                            console.error("Content script 알림 전송 실패:", err);
+                        }
+                    });
+            } else {
+                console.log("알림 전송 가능한 치지직 탭 없음");
             }
         } catch (error) {
-            console.error("Content script 알림 전송 실패:", error);
+            console.error("Content script 알림 전송 중 오류:", error);
         }
+    }
+
+    showStatus(message, isError = false) {
+        const statusElement = document.getElementById('status');
+        statusElement.textContent = message;
+        statusElement.className = isError ? 'error' : 'success';
+        setTimeout(() => {
+            statusElement.textContent = '';
+            statusElement.className = '';
+        }, 3000);
     }
 }
 
@@ -348,13 +304,11 @@ class SettingsManager {
                 CONSTANTS.STORAGE_KEYS.SETTINGS,
                 CONSTANTS.STORAGE_KEYS.SHORTCUTS
             ]);
-            
             this.settings = { ...this.settings, ...result[CONSTANTS.STORAGE_KEYS.SETTINGS] };
             this.shortcuts = { ...this.shortcuts, ...result[CONSTANTS.STORAGE_KEYS.SHORTCUTS] };
-            
             this.updateUI();
         } catch (error) {
-            UIManager.showStatus('설정 로드 중 오류가 발생했습니다.', 'error');
+            this.showStatus('설정 로드 중 오류가 발생했습니다.', true);
         }
     }
 
@@ -365,17 +319,14 @@ class SettingsManager {
     validateSettings() {
         const { minRepetitions, maxRepetitions, minDelay, maxDelay } = this.settings;
 
-        // 반복 횟수 검사
         if (minRepetitions < 1 || maxRepetitions < 1) 
             return { isValid: false, errorMessage: '반복 횟수는 1 이상이어야 합니다.' };
         if (minRepetitions > 100 || maxRepetitions > 100)
             return { isValid: false, errorMessage: '반복 횟수는 100 이하여야 합니다.' };
-        // 딜레이 검사
-        if (minDelay < 500 || maxDelay < 500) 
-            return { isValid: false, errorMessage: '자동 입력 간격은 500ms 이상이어야 합니다.' };
+        if (minDelay < 1000 || maxDelay < 1000) 
+            return { isValid: false, errorMessage: '자동 입력 간격은 1000ms 이상이어야 합니다.' };
         if (minDelay > 9999 || maxDelay > 9999)
             return { isValid: false, errorMessage: '자동 입력 간격은 9999ms 이하여야 합니다.' };
-        // 최소값이 최대값보다 큰 경우 검사
         if (minRepetitions > maxRepetitions) 
             return { isValid: false, errorMessage: '최소값이 최대값보다 클 수 없습니다.' };
         if (minDelay > maxDelay)
@@ -418,13 +369,10 @@ class SettingsManager {
      * UI를 업데이트합니다.
      */
     updateUI() {
-        // 설정값 업데이트
         document.getElementById('minRepetitions').value = this.settings.minRepetitions;
         document.getElementById('maxRepetitions').value = this.settings.maxRepetitions;
         document.getElementById('minDelay').value = this.settings.minDelay;
         document.getElementById('maxDelay').value = this.settings.maxDelay;
-        
-        // 단축키 업데이트
         document.getElementById('shortcutDisplayManual').textContent = this.shortcuts.manual;
         document.getElementById('shortcutDisplayAuto').textContent = this.shortcuts.auto;
     }
@@ -437,6 +385,16 @@ class SettingsManager {
         this.settings.maxRepetitions = parseInt(document.getElementById('maxRepetitions').value) || CONSTANTS.DEFAULT_SETTINGS.maxRepetitions;
         this.settings.minDelay = parseInt(document.getElementById('minDelay').value) || CONSTANTS.DEFAULT_SETTINGS.minDelay;
         this.settings.maxDelay = parseInt(document.getElementById('maxDelay').value) || CONSTANTS.DEFAULT_SETTINGS.maxDelay;
+    }
+
+    showStatus(message, isError = false) {
+        const statusElement = document.getElementById('status');
+        statusElement.textContent = message;
+        statusElement.className = isError ? 'error' : 'success';
+        setTimeout(() => {
+            statusElement.textContent = '';
+            statusElement.className = '';
+        }, 3000);
     }
 }
 
@@ -470,20 +428,18 @@ class EventHandler {
      * 이벤트 리스너를 초기화합니다.
      */
     initializeEventListeners() {
-        // 저장 버튼 이벤트
-        document.getElementById('save').addEventListener('click', async () => {
+        document.getElementById('save')?.addEventListener('click', async () => {
             this.settingsManager.getSettingsFromUI();
             const result = await this.settingsManager.saveSettings();
             
             if (result.success) {
-                UIManager.showStatus('설정이 저장되었습니다.', 'success');
+                this.settingsManager.showStatus('설정이 저장되었습니다.', false);
             } else {
-                UIManager.showStatus(result.errorMessage, 'error');
+                this.settingsManager.showStatus(result.errorMessage, true);
             }
         });
 
-        // 단축키 설정 버튼 이벤트 리스너 다시 활성화
-        document.getElementById('shortcutButton').addEventListener('click', () => {
+        document.getElementById('shortcutButton')?.addEventListener('click', () => {
             chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
         });
     }

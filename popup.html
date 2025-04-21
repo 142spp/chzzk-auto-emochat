@@ -177,6 +177,27 @@
             background-color: var(--text-color);
         }
 
+        /* "단축키 변경" 버튼을 링크처럼 보이게 하는 스타일 */
+        #shortcutButton.shortcut-button {
+            background: none;
+            border: none;
+            padding: 0;
+            color: var(--primary-color);
+            text-decoration: none;
+            cursor: pointer;
+            font-size: inherit; /* 주변 텍스트 크기 상속 */
+            font-weight: normal; /* 기본 폰트 두께 */
+            width: auto; /* 내용에 맞게 너비 조절 */
+            display: inline; /* 인라인 요소처럼 배치 */
+            margin-top: 5px; /* 위쪽 여백 추가 */
+        }
+
+        #shortcutButton.shortcut-button:hover {
+            background: none; /* 호버 시 배경 변경 방지 */
+            color: var(--primary-hover);
+            text-decoration: underline;
+        }
+
         /* 이모티콘 선택 UI 스타일 */
         .emoticon-filter {
             margin-top: 15px;
@@ -247,6 +268,31 @@
         .select-all:hover {
             background-color: var(--text-color);
         }
+
+        /* 삭제 버튼 스타일 */
+        .remove-btn {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            width: 16px;
+            height: 16px;
+            background-color: var(--error-color);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 10px;
+            line-height: 16px; /* 높이와 같게 설정하여 수직 중앙 정렬 */
+            text-align: center;
+            font-weight: bold;
+            opacity: 0;
+            transition: opacity 0.2s ease-in-out;
+            z-index: 10; /* 다른 요소 위에 표시 */
+        }
+
+        .emoticon-item:hover .remove-btn {
+            opacity: 1; /* 마우스 호버 시 삭제 버튼 표시 */
+        }
     </style>
 </head>
 <body>
@@ -261,7 +307,7 @@
             </div>
             <div class="input-pair">
                 <label>최대:</label>
-                <input type="number" id="maxRepetitions" min="1" max="100" value="1">
+                <input type="number" id="maxRepetitions" min="1" max="100" value="10">
             </div>
         </div>
         <small>같은 랜덤 이모티콘을 최소/최대 횟수 사이에서 랜덤하게 반복 클릭합니다.</small>
@@ -272,12 +318,12 @@
         <div class="input-row">
             <div class="input-pair">
                 <label for="minDelay">최소</label>
-                <input type="number" id="minDelay" min="500" max="9999" step="100" value="2000">
+                <input type="number" id="minDelay" min="1000" max="9999" step="100" value="2000">
                 <span class="unit">ms</span>
             </div>
             <div class="input-pair">
                 <label for="maxDelay">최대</label>
-                <input type="number" id="maxDelay" min="500" max="9999" step="100" value="3000">
+                <input type="number" id="maxDelay" min="1000" max="9999" step="100" value="3000">
                 <span class="unit">ms</span>
             </div>
         </div>
@@ -288,9 +334,9 @@
         <label>단축키 설정</label>
         <small>
             수동 입력: <strong id="shortcutDisplayManual"></strong><br>
-            자동 토글: <strong id="shortcutDisplayAuto"></strong><br>
-            (<a href="chrome://extensions/shortcuts" target="_blank">단축키 변경</a>)
+            자동 토글: <strong id="shortcutDisplayAuto"></strong>
         </small>
+        <button id="shortcutButton" class="shortcut-button">단축키 변경</button>
     </div>
     <div class="emoticon-filter">
         <label>사용할 이모티콘 선택</label>

@@ -13,13 +13,11 @@ console.log("치지직 이모티콘 도우미 content script 로드됨 (v7).");
 const CONSTANTS = {
     SELECTORS: {
         CHAT_INPUT: "pre.live_chatting_input_input__2F3Et[contenteditable='true']",
-        SEND_BUTTON: "button.live_chatting_input_send_button__8KBrn#send_chat_or_donate",
-        EMOTICON_BUTTON: "button.emoticon_emoticon__q2Sw6",
         INPUT_CONTAINER: ".live_chatting_input_container__qA0ad"
     },
     STORAGE_KEYS: {
         EMOTICON_CACHE: 'emoticonCache',
-        SELECTED_EMOTICONS: 'selectedEmoticons'
+        SETTINGS: 'settings'
     },
     TOAST: {
         DURATION: 2500,
@@ -41,142 +39,63 @@ const CONSTANTS = {
 // --- 이모티콘 관리 클래스 ---
 class EmoticonManager {
     constructor() {
-        this.cachedEmoticons = CONSTANTS.DEFAULT_EMOTICONS; // 기본값으로 초기화
-        this.selectedIndices = []; // 선택된 이모티콘 인덱스 배열
+        this.cachedEmoticons = null; // 기본값으로 초기화
+        this.previousIndex = -1;
+        this.previousRepetitions = 0;
     }
-    
     /**
      * 스토리지에서 이모티콘 데이터와 선택 상태를 로드합니다.
      * @returns {Promise<void>}
      */
     async initialize() {
         try {
-            // 1. 스토리지에서 캐시 데이터와 선택 상태 로드
-            const result = await chrome.storage.local.get([
-                CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE,
-                CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS
-            ]);
-            
-            // 2. 이모티콘 캐시 데이터 처리
-            if (result && Array.isArray(result[CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE])) {
-                this.cachedEmoticons = result[CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE];
-                console.log(`이모티콘 캐시 로드 완료 (${this.cachedEmoticons.length}개)`);
-            } else {
-                console.log("유효한 이모티콘 캐시 없음, 기본 이모티콘 사용");
-            }
-            
-            // 3. 선택된 인덱스 처리
-            if (result && Array.isArray(result[CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS])) {
-                this.selectedIndices = result[CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS];
-                console.log(`선택된 이모티콘 로드 완료 (${this.selectedIndices.length}개 활성화)`);
-            } else {
-                // 기본적으로 모든 이모티콘 선택 상태로 설정
-                this.selectedIndices = Array.from({ length: this.cachedEmoticons.length }, (_, i) => i);
-                console.log(`선택 정보 없음, 모든 이모티콘 활성화 (${this.selectedIndices.length}개)`);
-                
-                // 스토리지에 기본 선택 상태 저장
-                await this.saveSelectedIndices();
-            }
+            const result = await chrome.storage.local.get([CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE]).then(result => result[CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE] || []);
+            if (result && Array.isArray(result)) this.cachedEmoticons = result;
+            else this.cachedEmoticons = CONSTANTS.DEFAULT_EMOTICONS;
         } catch (error) {
             console.error('이모티콘 초기화 중 오류:', error);
             UIManager.showToast('이모티콘 초기화 중 오류 발생');
         }
     }
-    
-    /**
-     * 현재 선택된 인덱스를 스토리지에 저장합니다.
-     * @returns {Promise<void>}
-     */
-    async saveSelectedIndices() {
-        try {
-            await chrome.storage.local.set({
-                [CONSTANTS.STORAGE_KEYS.SELECTED_EMOTICONS]: this.selectedIndices
-            });
-            console.log(`선택된 이모티콘 인덱스 저장 완료 (${this.selectedIndices.length}개)`);
-        } catch (error) {
-            console.error('선택 상태 저장 중 오류:', error);
-        }
-    }
-    
     /**
      * 사용 가능한 이모티콘 목록을 반환합니다. (선택된 이모티콘만)
      * @returns {Array} 사용 가능한 이모티콘 배열
      */
     getAvailableEmoticons() {
-        // 1. 선택된 인덱스가 비어있으면 모든 이모티콘 사용
-        if (!this.selectedIndices || this.selectedIndices.length === 0) {
-            console.log("선택된 이모티콘 없음 - 모든 이모티콘 사용");
-            return [...this.cachedEmoticons];
-        }
-        
-        // 2. 선택된 인덱스에 해당하는 이모티콘만 필터링
-        const selectedEmoticons = this.selectedIndices
-            .filter(index => index >= 0 && index < this.cachedEmoticons.length)
-            .map(index => this.cachedEmoticons[index]);
-            
-        console.log(`선택된 이모티콘 ${selectedEmoticons.length}개 사용 준비 완료`);
-        
-        // 3. 안전장치: 필터링된 결과가 비어있으면 모든 이모티콘 사용
+        const selectedEmoticons = this.cachedEmoticons.filter(emoticon => emoticon.selected);
         if (selectedEmoticons.length === 0) {
-            console.log("선택된 이모티콘 필터링 결과 없음 - 모든 이모티콘 사용");
             return [...this.cachedEmoticons];
         }
-        
         return selectedEmoticons;
-    }
-    
-    /**
-     * 현재 선택된 이모티콘 목록을 업데이트합니다.
-     * @param {Array<number>} newIndices - 새 선택 인덱스 배열
-     * @returns {Promise<void>}
-     */
-    async updateSelectedEmoticons(newIndices) {
-        // 1. 유효성 검증
-        if (!Array.isArray(newIndices)) {
-            console.error("updateSelectedEmoticons: 유효하지 않은 인덱스 배열");
-            return;
-        }
-        
-        // 2. 메모리 상태 업데이트
-        this.selectedIndices = newIndices;
-        console.log(`선택된 이모티콘 인덱스 업데이트 (${newIndices.length}개 활성화)`);
-        
-        // 3. 변경사항 저장 (선택 사항)
-        // await this.saveSelectedIndices(); // 일반적으로 팝업에서 이미 저장함
-    }
-    
-    /**
-     * 로컬 스토리지의 이모티콘 캐시를 현재 캐시된 데이터로 업데이트합니다.
-     * @returns {Promise<void>}
-    */
-    async updateEmoticon() {
-        try {
-            await chrome.storage.local.set({
-                [CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE]: this.cachedEmoticons
-            });
-        } catch (error) {
-            console.error('캐시 데이터를 업데이트하는 중 오류 발생:', error);
-        }
-    }
-    
+    } 
     /**
      * 이모티콘 데이터를 준비합니다.
      * @returns {Promise<{success: boolean, data?: {editableArea: Element, newHtmlString: string, newWorkingChat: string, newEmoticonMap: Object}, error?: string}>}
     */
-    async prepareEmoticon() {
+    async prepareEmoticons() {
+        const MAX_RETRIES = 5;
         try {
-            const settings = await chrome.storage.sync.get(['minRepetitions', 'maxRepetitions']);
+            const settings = await chrome.storage.sync.get([CONSTANTS.STORAGE_KEYS.SETTINGS]).then(result => result[CONSTANTS.STORAGE_KEYS.SETTINGS] || {});
             const availableEmoticons = this.getAvailableEmoticons();
-
             if (availableEmoticons.length === 0) {
                 throw new Error("사용 가능한 이모티콘이 없습니다.");
             }
-
             const minReps = Math.max(1, settings.minRepetitions || 1);
             const maxReps = Math.max(minReps, settings.maxRepetitions || 1);
-            const actualRepetitions = Math.floor(Math.random() * (maxReps - minReps + 1)) + minReps;
+            let retryCount = 0, actualRepetitions, randomIndex;
+            do {
+                actualRepetitions = Math.floor(Math.random() * (maxReps - minReps + 1)) + minReps;
+                randomIndex = Math.floor(Math.random() * availableEmoticons.length);
+                if (actualRepetitions === this.previousRepetitions && randomIndex === this.previousIndex) retryCount++;
+                else break;
+            } while (retryCount < MAX_RETRIES);
 
-            const randomIndex = Math.floor(Math.random() * availableEmoticons.length);
+            if (retryCount === MAX_RETRIES) {
+                console.warn(`최대 재시도 (${MAX_RETRIES}회) 초과. 동일한 이모티콘/반복으로 진행합니다.`);
+            }
+            this.previousRepetitions = actualRepetitions;
+            this.previousIndex = randomIndex;
+
             const chosenEmoticon = availableEmoticons[randomIndex];
             const { name, url } = chosenEmoticon;
             const placeholder = `{:${name}:}`;
@@ -199,7 +118,6 @@ class EmoticonManager {
             if (!newEmoticonMap[name]) {
                 newEmoticonMap[name] = url;
             }
-
             return {
                 success: true,
                 data: {
@@ -222,30 +140,21 @@ class EmoticonManager {
      * @param {boolean} isAuto - 자동 전송 여부
      * @returns {Promise<boolean>} 전송 성공 여부
     */
-    async sendEmoticon(isAuto = false) {
+    async sendRandomEmoticons(isAuto = false) {
         try {
-            const prepared = await this.prepareEmoticon();
+            const prepared = await this.prepareEmoticons();
             if (!prepared.success) return false;
-
             const { editableArea, newHtmlString, newWorkingChat, newEmoticonMap } = prepared.data;
-
-            // DOM 업데이트
             editableArea.focus();
             editableArea.innerHTML = newHtmlString;
             editableArea.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-
-            // Main World 변수 업데이트
             if (typeof await MainWorldManager.getVariable(CONSTANTS.MAIN_WORLD_VARS.WORKING_CHAT) !== 'undefined') {
                 await MainWorldManager.setVariable(CONSTANTS.MAIN_WORLD_VARS.WORKING_CHAT, newWorkingChat);
                 await MainWorldManager.setVariable(CONSTANTS.MAIN_WORLD_VARS.WORKING_EMOTICON, newEmoticonMap);
             }
-
-            // 자동 전송일 경우에만 딜레이 추가
             if (isAuto) {
                 await new Promise(resolve => setTimeout(resolve, CONSTANTS.AUTO_SEND_DELAY));
             }
-
-            // Enter 키 이벤트 발생
             await new Promise(resolve => setTimeout(resolve, 100));
             editableArea.dispatchEvent(new KeyboardEvent('keypress', {
                 key: 'Enter',
@@ -256,15 +165,12 @@ class EmoticonManager {
                 cancelable: true,
                 composed: true
             }));
-
-            // 초기화
             editableArea.innerHTML = "";
             editableArea.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
             if (typeof await MainWorldManager.getVariable(CONSTANTS.MAIN_WORLD_VARS.WORKING_CHAT) !== 'undefined') {
                 await MainWorldManager.setVariable(CONSTANTS.MAIN_WORLD_VARS.WORKING_CHAT, "");
                 await MainWorldManager.setVariable(CONSTANTS.MAIN_WORLD_VARS.WORKING_EMOTICON, {});
             }
-
             return true;
         } catch (error) {
             console.error("이모티콘 전송 중 오류 발생:", error);
@@ -277,23 +183,22 @@ class EmoticonManager {
     * @returns {Promise<void>}
     * @throws {Error} 캐시에 추가하는 중 오류가 발생할 경우
     */
-    async addEmoticon(emoticonData) {
+    async addEmoticonToCache(emoticonData) {
         try {
             // 중복 체크
             const isDuplicate = this.cachedEmoticons.some(item =>
                 item.name === emoticonData.name &&
                 item.url === emoticonData.url
             );
-
             if (!isDuplicate) {
-                this.cachedEmoticons.push(emoticonData);
-                await this.updateEmoticon();
-                console.log('이모티콘이 캐시에 추가되었습니다.');
+                this.cachedEmoticons.push({ ...emoticonData, selected: true });
+                await chrome.storage.local.set({
+                    [CONSTANTS.STORAGE_KEYS.EMOTICON_CACHE]: this.cachedEmoticons
+                });
             } else {
-                console.log('이미 캐시에 존재하는 이모티콘입니다.');
+                throw new Error('이모티콘이 이미 캐시에 존재합니다.');
             }
         } catch (error) {
-            console.error('이모티콘 캐시 추가 중 오류 발생:', error);
             throw error;
         }
     }
@@ -308,10 +213,9 @@ class EmoticonManager {
             if (!emoticonData || !emoticonData.url || !emoticonData.name) {
                 throw new Error("잘못된 이모티콘 데이터 형식입니다.");
             }
-            await this.addEmoticon(emoticonData);
+            await this.addEmoticonToCache(emoticonData);
             UIManager.showToast('이모티콘이 캐시에 추가되었습니다.');
         } catch (error) {
-            console.error('이모티콘 추가 중 오류 발생:', error);
             UIManager.showToast(`이모티콘 추가 중 오류: ${error.message}`);
         }
     }
@@ -429,14 +333,9 @@ class MessageHandler {
                 // 이모티콘 전송 요청 처리 (자동/수동)
                 case "injectAndSendTrigger":
                     console.log(`이모티콘 전송 요청 (자동: ${message.isAuto})`);
-                    const success = await this.emoticonManager.sendEmoticon(message.isAuto);
-                    
-                    if (success) {
-                        console.log("이모티콘 전송 성공");
-                    } else {
-                        console.error("이모티콘 전송 실패");
-                    }
-                    
+                    const success = await this.emoticonManager.sendRandomEmoticons(message.isAuto);
+                    if (success) console.log("이모티콘 전송 성공");
+                    else console.error("이모티콘 전송 실패");
                     sendResponse({ success });
                     break;
 
@@ -445,9 +344,8 @@ class MessageHandler {
                     console.log("이모티콘 목록 요청됨");
                     sendResponse({ 
                         emoticons: this.emoticonManager.cachedEmoticons,
-                        selectedIndices: this.emoticonManager.selectedIndices
                     });
-                    console.log(`이모티콘 목록 응답: ${this.emoticonManager.cachedEmoticons.length}개 캐시됨, ${this.emoticonManager.selectedIndices.length}개 선택됨`);
+                    console.log(`이모티콘 목록 응답: ${this.emoticonManager.cachedEmoticons.length}개 캐시됨`);
                     break;
 
                 // 이모티콘 캐시 추가 요청 처리 (컨텍스트 메뉴)
@@ -506,16 +404,10 @@ class MessageHandler {
 (async () => {
     const emoticonManager = new EmoticonManager();
     await emoticonManager.initialize(); // EmoticonManager 초기화 (스토리지 로드)
-
     const messageHandler = new MessageHandler(emoticonManager);
-
-    // 메시지 리스너 등록
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-        // messageHandler.handleMessage가 비동기 함수이므로 await 필요 없음 (내부에서 처리)
         messageHandler.handleMessage(message, sender, sendResponse);
-        return true; // 비동기 응답을 위해 true 반환
+        return true;
     });
-
-    // --- 페이지 로드 시 초기화 (더 이상 필요 없음) ---
     console.log("치지직 이모티콘 도우미 content script 초기화 완료.");
 })();

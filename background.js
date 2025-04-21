@@ -6,6 +6,9 @@ const CONSTANTS = {
         minDelay: 2000,
         maxDelay: 3000
     },
+    STORAGE_KEYS: {
+        SETTINGS: 'settings'
+    },
     MIN_DELAY: 500,
     MANUAL_DELAY: 1000, // 수동 입력 딜레이
     BADGE_COLORS: {
@@ -229,9 +232,9 @@ class AutoSendManager {
             return;
         }
 
-        const settings = await chrome.storage.sync.get(['minDelay', 'maxDelay']);
-        const minDelay = Math.max(CONSTANTS.MIN_DELAY, settings.minDelay || CONSTANTS.DEFAULT_SETTINGS.minDelay);
-        const maxDelay = Math.max(minDelay, settings.maxDelay || CONSTANTS.DEFAULT_SETTINGS.maxDelay);
+        const settings = await chrome.storage.sync.get([CONSTANTS.STORAGE_KEYS.SETTINGS]).then(result => result[CONSTANTS.STORAGE_KEYS.SETTINGS]) || CONSTANTS.DEFAULT_SETTINGS;
+        const minDelay = Math.max(CONSTANTS.MIN_DELAY, settings.minDelay);
+        const maxDelay = Math.max(minDelay, settings.maxDelay);
         const randomDelay = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
 
         console.log(`다음 자동 실행 ${randomDelay}ms 후에 예약됨`);
@@ -342,7 +345,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
             target: { tabId: tab.id },
             func: (srcUrl) => {
                 const img = document.querySelector(`img[src="${srcUrl}"]`);
-                return img ? img.alt : null;
+                return img ? img.alt.replace(/[{},:]/g, '') : null;
             },
             args: [info.srcUrl]
         }).then(([{ result: alt }]) => {
