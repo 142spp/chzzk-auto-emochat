@@ -293,6 +293,27 @@
         .emoticon-item:hover .remove-btn {
             opacity: 1; /* 마우스 호버 시 삭제 버튼 표시 */
         }
+
+        /* 로딩 스피너 스타일 */
+        .loading-indicator {
+            display: flex; /* 기본적으로 숨김 */
+            justify-content: center;
+            align-items: center;
+            height: 50px; /* 높이 지정 */
+            margin: 10px 0; /* 위아래 여백 */
+        }
+        .loading-indicator::after {
+            content: "";
+            width: 20px;
+            height: 20px;
+            border: 3px solid var(--primary-color);
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -340,6 +361,7 @@
     </div>
     <div class="emoticon-filter">
         <label>사용할 이모티콘 선택</label>
+        <div id="loadingIndicator" class="loading-indicator" style="display: flex;"></div>
         <div class="emoticon-list" id="emoticonList">
             <!-- 이모티콘 목록이 여기에 동적으로 추가됩니다 -->
         </div>

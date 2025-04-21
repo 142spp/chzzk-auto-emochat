@@ -5,3 +5,6 @@
 .nx/installation
 .nx/cache
 .nx/workspace-data
+
+# git 관련 파일
+.gitignore
